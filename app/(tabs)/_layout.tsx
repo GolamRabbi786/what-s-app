@@ -1,16 +1,19 @@
 import { Tabs } from 'expo-router';
-import { Home } from 'lucide-react-native';
 
 export default function TabLayout() {
   return (
-    <Tabs>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
-        }}
-      />
+    <Tabs
+      tabBar={() => null}
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: { display: 'none' },
+      }}
+    >
+      <Tabs.Screen name="index" options={{ title: 'Chats' }} />
+      <Tabs.Screen name="updates" options={{ title: 'Status' }} />
+      <Tabs.Screen name="communities" options={{ title: 'Communities' }} />
+      <Tabs.Screen name="calls" options={{ title: 'Calls' }} />
+      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
     </Tabs>
   );
 }
