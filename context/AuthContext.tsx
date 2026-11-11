@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   useCallback,
@@ -7,38 +6,11 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import { authClient, type SessionProfile } from '../lib/auth-client';
+import { apiRequest } from '../lib/client';
 import { Account, AccountStatus, Broadcast, Country } from '../lib/types';
 
-const STORAGE_KEY = 'whatsapp-web-auth-v1';
-
 export const ADMIN_USERNAME = 'GolamRabbi786';
-const ADMIN_PASSWORD = 'G.rabbi3046';
-const ADMIN_ID = 'admin-golam-rabbi';
-
-const ADMIN_ACCOUNT: Account = {
-  id: ADMIN_ID,
-  name: 'Golam Rabbi',
-  username: ADMIN_USERNAME,
-  email: 'admin@whatsapp.app',
-  phone: '1700000000',
-  countryCode: '+880',
-  countryName: 'Bangladesh',
-  passwordHash: '',
-  role: 'admin',
-  status: 'active',
-  verified: true,
-  about: 'Platform administrator',
-  createdAt: '2024-01-01T00:00:00.000Z',
-  lastActiveAt: '2024-01-01T00:00:00.000Z',
-};
-
-interface StoredAuth {
-  version: number;
-  accounts: Account[];
-  sessionId: string | null;
-  broadcasts: Broadcast[];
-  adminPassword: string;
-}
 
 export interface AuthResult {
   ok: boolean;
@@ -61,164 +33,168 @@ interface AuthContextValue {
   accounts: Account[];
   broadcasts: Broadcast[];
   isAdmin: boolean;
-  signIn: (identifier: string, password: string) => AuthResult;
-  signUp: (input: SignUpInput) => AuthResult;
-  signOut: () => void;
+  signIn: (identifier: string, password: string) => Promise<AuthResult>;
+  signUp: (input: SignUpInput) => Promise<AuthResult>;
+  signOut: () => Promise<void>;
   updateProfile: (updates: Partial<Account>) => void;
   resetPassword: (identifier: string, newPassword: string) => AuthResult;
-  adminUpdateUser: (id: string, updates: Partial<Account>) => AuthResult;
-  adminDeleteUser: (id: string) => AuthResult;
-  adminResetPassword: (id: string) => AuthResult;
+  adminUpdateUser: (id: string, updates: Partial<Account>) => Promise<AuthResult>;
+  adminDeleteUser: (id: string) => Promise<AuthResult>;
+  adminResetPassword: (id: string) => Promise<AuthResult>;
   sendBroadcast: (input: {
     title: string;
     message: string;
     audience: Broadcast['audience'];
-  }) => AuthResult;
-  deleteBroadcast: (id: string) => void;
-  toggleUserStatus: (id: string) => void;
-  toggleUserVerified: (id: string) => void;
-  changeAdminPassword: (current: string, next: string) => AuthResult;
+  }) => Promise<AuthResult>;
+  deleteBroadcast: (id: string) => Promise<void>;
+  toggleUserStatus: (id: string) => Promise<void>;
+  toggleUserVerified: (id: string) => Promise<void>;
+  changeAdminPassword: (current: string, next: string) => Promise<AuthResult>;
   adminPassword: string;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function hashPassword(value: string) {
-  let h1 = 0xdeadbeef ^ value.length;
-  let h2 = 0x41c6ce57 ^ value.length;
-  for (let i = 0; i < value.length; i += 1) {
-    const ch = value.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return `${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
-}
-
-function withAdmin(accounts: Account[], adminPassword: string): Account[] {
-  const filtered = accounts.filter(
-    (account) => account.username.toLowerCase() !== ADMIN_USERNAME.toLowerCase(),
-  );
-  return [
-    {
-      ...ADMIN_ACCOUNT,
-      passwordHash: hashPassword(adminPassword),
-    },
-    ...filtered,
-  ];
-}
-
 const digits = (value: string) => value.replace(/\D/g, '');
 
-const normalizePhone = (country: Country, phone: string) =>
-  `${digits(country.dial)}${digits(phone)}`;
+function toAccount(user: SessionProfile): Account {
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username ?? user.email.split('@')[0],
+    email: user.email,
+    phone: user.phone ?? '',
+    countryCode: user.countryCode ?? '',
+    countryName: user.countryName ?? '',
+    passwordHash: '',
+    role: user.role === 'admin' ? 'admin' : 'user',
+    status: (user.status === 'suspended' ? 'suspended' : 'active') as AccountStatus,
+    verified: Boolean(user.verified ?? user.emailVerified),
+    about: user.about ?? 'Hey there! I am using WhatsApp.',
+    avatar: user.image ?? undefined,
+    createdAt: new Date(user.createdAt).toISOString(),
+    lastActiveAt: new Date(user.lastActiveAt ?? user.createdAt).toISOString(),
+  };
+}
+
+function friendlyAuthError(message: string, byEmail: boolean) {
+  const value = message.toLowerCase();
+
+  if (value.includes('already exists') || value.includes('already taken')) {
+    return 'An account with those details already exists.';
+  }
+  if (value.includes('invalid username or password') || value.includes('invalid email or password')) {
+    return 'Incorrect details. Please check and try again.';
+  }
+  if (value.includes('user not found')) {
+    return 'No account found with those details.';
+  }
+  if (value.includes('password')) {
+    return byEmail ? message : 'Incorrect details. Please check and try again.';
+  }
+  if (value.includes('username')) {
+    return 'Username must be 3–24 characters (letters, numbers, dots or underscores).';
+  }
+
+  return message;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [accounts, setAccounts] = useState<Account[]>(() => withAdmin([], ADMIN_PASSWORD));
+  const { data: session, isPending, refetch } = authClient.useSession();
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
-  const [adminPassword, setAdminPassword] = useState(ADMIN_PASSWORD);
 
-  useEffect(() => {
-    let mounted = true;
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
-        if (!mounted || !raw) return;
-        try {
-          const parsed = JSON.parse(raw) as StoredAuth;
-          const password = parsed.adminPassword || ADMIN_PASSWORD;
-          const restored = withAdmin(parsed.accounts ?? [], password);
-          if (parsed.adminPassword) setAdminPassword(parsed.adminPassword);
-          setAccounts(restored);
-          setBroadcasts(parsed.broadcasts ?? []);
-          const session = parsed.sessionId
-            ? restored.find((account) => account.id === parsed.sessionId)
-            : null;
-          setSessionId(session && session.status === 'active' ? session.id : null);
-        } catch {
-          setAccounts(withAdmin([], ADMIN_PASSWORD));
-        }
-      })
-      .finally(() => {
-        if (mounted) setHydrated(true);
-      });
-    return () => {
-      mounted = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const currentUser = useMemo<Account | null>(() => {
+    if (!session?.user) return null;
+    return toAccount(session.user as SessionProfile);
+  }, [session?.user]);
+
+  const isAdmin = currentUser?.role === 'admin';
+  const hydrated = !isPending;
+
+  const refreshAccounts = useCallback(async () => {
+    try {
+      const result = await apiRequest<{ accounts: Account[] }>('/api/admin/users');
+      setAccounts(result.accounts);
+    } catch {
+      setAccounts((previous) => previous);
+    }
+  }, []);
+
+  const refreshBroadcasts = useCallback(async () => {
+    try {
+      const result = await apiRequest<{ broadcasts: Broadcast[] }>('/api/broadcasts');
+      setBroadcasts(result.broadcasts);
+    } catch {
+      setBroadcasts((previous) => previous);
+    }
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
-    const payload: StoredAuth = {
-      version: 1,
-      accounts,
-      sessionId,
-      broadcasts,
-      adminPassword,
-    };
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload)).catch(() => undefined);
-  }, [accounts, sessionId, broadcasts, adminPassword, hydrated]);
+    if (!session?.user) {
+      setAccounts([]);
+      setBroadcasts([]);
+      return;
+    }
 
-  const currentUser = useMemo(
-    () => accounts.find((account) => account.id === sessionId) ?? null,
-    [accounts, sessionId],
-  );
+    void refreshBroadcasts();
+  }, [session?.user?.id, refreshBroadcasts, session?.user]);
 
-  const touch = useCallback((id: string) => {
-    setAccounts((prev) =>
-      prev.map((account) =>
-        account.id === id ? { ...account, lastActiveAt: new Date().toISOString() } : account,
-      ),
-    );
-  }, []);
+  useEffect(() => {
+    if (!session?.user || !isAdmin) {
+      setAccounts([]);
+      return;
+    }
+
+    void refreshAccounts();
+  }, [session?.user?.id, isAdmin, refreshAccounts, session?.user]);
 
   const signIn = useCallback(
-    (identifier: string, password: string): AuthResult => {
+    async (identifier: string, password: string): Promise<AuthResult> => {
       const value = identifier.trim();
       if (!value || !password) {
         return { ok: false, error: 'Enter your account and password to continue.' };
       }
-      const needle = value.toLowerCase();
-      const phoneNeedle = digits(value);
-      const account = accounts.find(
-        (item) =>
-          item.username.toLowerCase() === needle ||
-          item.email.toLowerCase() === needle ||
-          (phoneNeedle.length >= 6 &&
-            (digits(item.phone) === phoneNeedle ||
-              normalizePhone(
-                { iso: '', name: item.countryName, dial: digits(item.countryCode), flag: '' },
-                item.phone,
-              ) === phoneNeedle)),
-      );
 
-      if (!account) return { ok: false, error: 'No account found with those details.' };
-      if (account.passwordHash !== hashPassword(password)) {
-        return { ok: false, error: 'Incorrect password. Please try again.' };
+      const byEmail = value.includes('@');
+      const result = byEmail
+        ? await authClient.signIn.email({ email: value, password })
+        : await authClient.signIn.username({ username: value, password });
+
+      if (result.error) {
+        return {
+          ok: false,
+          error: friendlyAuthError(result.error.message ?? 'Unable to sign in.', byEmail),
+        };
       }
+
+      const user = result.data?.user as SessionProfile | undefined;
+      if (!user) {
+        return { ok: false, error: 'Unable to sign in. Please try again.' };
+      }
+
+      const account = toAccount(user);
       if (account.status === 'suspended') {
+        await authClient.signOut();
         return {
           ok: false,
           error: 'This account is suspended. Please contact the platform administrator.',
         };
       }
 
-      setSessionId(account.id);
-      touch(account.id);
+      await refetch();
       return { ok: true, role: account.role };
     },
-    [accounts, touch],
+    [refetch],
   );
 
   const signUp = useCallback(
-    (input: SignUpInput): AuthResult => {
+    async (input: SignUpInput): Promise<AuthResult> => {
       const name = input.name.trim();
       const username = input.username.trim();
       const email = input.email.trim();
       const phoneDigits = digits(input.phone);
+      const countryCode = `+${digits(input.country.dial)}`;
 
       if (name.length < 2) return { ok: false, error: 'Please enter your full name.' };
       if (!/^[a-zA-Z0-9._]{3,24}$/.test(username)) {
@@ -237,207 +213,221 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
         return { ok: false, error: 'That username is reserved.' };
       }
-      if (accounts.some((item) => item.username.toLowerCase() === username.toLowerCase())) {
-        return { ok: false, error: 'That username is already taken.' };
-      }
-      if (accounts.some((item) => item.email.toLowerCase() === email.toLowerCase())) {
-        return { ok: false, error: 'An account with that email already exists.' };
-      }
-      if (
-        accounts.some(
-          (item) =>
-            `${digits(item.countryCode)}${digits(item.phone)}` ===
-            normalizePhone(input.country, phoneDigits),
-        )
-      ) {
-        return { ok: false, error: 'An account with that phone number already exists.' };
-      }
 
-      const account: Account = {
-        id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      const result = await authClient.signUp.email({
         name,
-        username,
         email,
+        password: input.password,
+        username,
+        displayUsername: username,
         phone: phoneDigits,
-        countryCode: `+${input.country.dial}`,
+        phoneFull: `${countryCode}${phoneDigits}`,
+        countryCode,
         countryName: input.country.name,
-        passwordHash: hashPassword(input.password),
-        role: 'user',
-        status: 'active',
-        verified: false,
         about: 'Hey there! I am using WhatsApp.',
-        createdAt: new Date().toISOString(),
-        lastActiveAt: new Date().toISOString(),
-      };
+      });
 
-      setAccounts((prev) => [account, ...prev]);
-      setSessionId(account.id);
+      if (result.error) {
+        const message = result.error.message ?? 'Unable to create the account.';
+        const lower = message.toLowerCase();
+        if (lower.includes('user already exists') || lower.includes('email')) {
+          return { ok: false, error: 'An account with that email already exists.' };
+        }
+        if (lower.includes('username')) {
+          return { ok: false, error: 'That username is already taken.' };
+        }
+        return { ok: false, error: message };
+      }
+
+      await refetch();
       return { ok: true, role: 'user' };
     },
-    [accounts],
+    [refetch],
   );
 
-  const signOut = useCallback(() => {
-    setSessionId(null);
+  const signOut = useCallback(async () => {
+    await authClient.signOut();
+    setAccounts([]);
+    setBroadcasts([]);
   }, []);
 
   const updateProfile = useCallback(
     (updates: Partial<Account>) => {
-      if (!sessionId) return;
-      setAccounts((prev) =>
-        prev.map((account) => (account.id === sessionId ? { ...account, ...updates } : account)),
-      );
+      const payload: Record<string, unknown> = {};
+      if (updates.name) payload.name = updates.name;
+      if (updates.avatar !== undefined) payload.image = updates.avatar;
+      if (updates.about !== undefined) payload.about = updates.about;
+
+      if (Object.keys(payload).length === 0) return;
+
+      void authClient
+        .updateUser(payload as never)
+        .then(() => refetch())
+        .catch(() => undefined);
     },
-    [sessionId],
+    [refetch],
   );
 
-  const resetPassword = useCallback(
-    (identifier: string, newPassword: string): AuthResult => {
-      const needle = identifier.trim().toLowerCase();
-      if (!needle) return { ok: false, error: 'Enter your username or email.' };
-      if (newPassword.length < 6) {
-        return { ok: false, error: 'Password must be at least 6 characters.' };
-      }
-      const account = accounts.find(
-        (item) =>
-          item.username.toLowerCase() === needle || item.email.toLowerCase() === needle,
-      );
-      if (!account) return { ok: false, error: 'No account found with those details.' };
-      if (account.role === 'admin') {
-        return {
-          ok: false,
-          error: 'The built-in admin password is managed inside the admin panel.',
-        };
-      }
-      setAccounts((prev) =>
-        prev.map((item) =>
-          item.id === account.id ? { ...item, passwordHash: hashPassword(newPassword) } : item,
-        ),
-      );
-      return { ok: true };
-    },
-    [accounts],
-  );
+  const resetPassword = useCallback((identifier: string, newPassword: string): AuthResult => {
+    if (!identifier.trim()) return { ok: false, error: 'Enter your username or email.' };
+    if (newPassword.length < 6) {
+      return { ok: false, error: 'Password must be at least 6 characters.' };
+    }
+    return {
+      ok: false,
+      error:
+        'Self-service password reset needs email delivery. Ask the platform administrator to reset it for you from the Admin Center.',
+    };
+  }, []);
 
   const adminUpdateUser = useCallback(
-    (id: string, updates: Partial<Account>): AuthResult => {
-      const target = accounts.find((item) => item.id === id);
-      if (!target) return { ok: false, error: 'Account not found.' };
-      const safeUpdates = { ...updates };
-      if (target.role === 'admin') {
-        delete safeUpdates.role;
-        delete safeUpdates.status;
-        delete safeUpdates.username;
-      }
-      if (safeUpdates.username) {
-        const username = safeUpdates.username;
-        if (
-          accounts.some(
-            (item) => item.id !== id && item.username.toLowerCase() === username.toLowerCase(),
-          )
-        ) {
-          return { ok: false, error: 'That username is already taken.' };
+    async (id: string, updates: Partial<Account>): Promise<AuthResult> => {
+      try {
+        const result = await apiRequest<{ account: Account | null }>('/api/admin/users', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            action: 'update',
+            id,
+            updates: {
+              name: updates.name,
+              username: updates.username,
+              phone: updates.phone,
+              about: updates.about,
+              role: updates.role,
+            },
+          }),
+        });
+        if (result.account) {
+          setAccounts((previous) =>
+            previous.map((item) => (item.id === id ? result.account! : item)),
+          );
         }
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Unable to update.' };
       }
-      setAccounts((prev) =>
-        prev.map((account) => (account.id === id ? { ...account, ...safeUpdates } : account)),
-      );
-      return { ok: true };
     },
-    [accounts],
+    [],
   );
 
   const adminDeleteUser = useCallback(
-    (id: string): AuthResult => {
-      const target = accounts.find((item) => item.id === id);
-      if (!target) return { ok: false, error: 'Account not found.' };
-      if (target.role === 'admin') {
-        return { ok: false, error: 'The built-in administrator cannot be deleted.' };
+    async (id: string): Promise<AuthResult> => {
+      try {
+        await apiRequest('/api/admin/users', {
+          method: 'DELETE',
+          body: JSON.stringify({ id }),
+        });
+        setAccounts((previous) => previous.filter((item) => item.id !== id));
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Unable to delete.' };
       }
-      setAccounts((prev) => prev.filter((account) => account.id !== id));
-      if (sessionId === id) setSessionId(null);
-      return { ok: true };
     },
-    [accounts, sessionId],
+    [],
   );
 
-  const adminResetPassword = useCallback(
-    (id: string): AuthResult => {
-      const target = accounts.find((item) => item.id === id);
-      if (!target) return { ok: false, error: 'Account not found.' };
-      if (target.role === 'admin') {
-        return { ok: false, error: 'Use the admin security panel to change this password.' };
-      }
-      const temporary = `wa${Math.random().toString(36).slice(2, 8)}`;
-      setAccounts((prev) =>
-        prev.map((account) =>
-          account.id === id ? { ...account, passwordHash: hashPassword(temporary) } : account,
-        ),
-      );
-      return { ok: true, error: temporary };
-    },
-    [accounts],
-  );
-
-  const toggleUserStatus = useCallback((id: string) => {
-    setAccounts((prev) =>
-      prev.map((account) => {
-        if (account.id !== id || account.role === 'admin') return account;
-        return {
-          ...account,
-          status: (account.status === 'active' ? 'suspended' : 'active') as AccountStatus,
-        };
-      }),
-    );
+  const adminResetPassword = useCallback(async (id: string): Promise<AuthResult> => {
+    try {
+      const result = await apiRequest<{ temporaryPassword: string }>('/api/admin/users', {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'resetPassword', id }),
+      });
+      return { ok: true, error: result.temporaryPassword };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Unable to reset.' };
+    }
   }, []);
-
-  const toggleUserVerified = useCallback((id: string) => {
-    setAccounts((prev) =>
-      prev.map((account) =>
-        account.id === id ? { ...account, verified: !account.verified } : account,
-      ),
-    );
-  }, []);
-
-  const changeAdminPassword = useCallback(
-    (current: string, next: string): AuthResult => {
-      if (current !== adminPassword) return { ok: false, error: 'Current password is incorrect.' };
-      if (next.length < 6) return { ok: false, error: 'New password must be at least 6 characters.' };
-      setAdminPassword(next);
-      setAccounts((prev) => withAdmin(prev, next));
-      return { ok: true };
-    },
-    [adminPassword],
-  );
 
   const sendBroadcast = useCallback(
-    (input: {
+    async (input: {
       title: string;
       message: string;
       audience: Broadcast['audience'];
-    }): AuthResult => {
-      const title = input.title.trim();
-      const message = input.message.trim();
-      if (!title || !message) return { ok: false, error: 'Add a title and a message.' };
-      const broadcast: Broadcast = {
-        id: `broadcast-${Date.now()}`,
-        title,
-        message,
-        audience: input.audience,
-        createdAt: new Date().toISOString(),
-        sentBy: currentUser?.name ?? 'Administrator',
-      };
-      setBroadcasts((prev) => [broadcast, ...prev]);
-      return { ok: true };
+    }): Promise<AuthResult> => {
+      try {
+        const result = await apiRequest<{ broadcast: Broadcast }>('/api/broadcasts', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        });
+        setBroadcasts((previous) => [result.broadcast, ...previous]);
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : 'Unable to send broadcast.',
+        };
+      }
     },
-    [currentUser?.name],
+    [],
   );
 
-  const deleteBroadcast = useCallback((id: string) => {
-    setBroadcasts((prev) => prev.filter((item) => item.id !== id));
+  const deleteBroadcast = useCallback(async (id: string) => {
+    try {
+      await apiRequest('/api/broadcasts', {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
+      setBroadcasts((previous) => previous.filter((item) => item.id !== id));
+    } catch {
+      // Keep the broadcast visible when the server rejects the removal.
+    }
   }, []);
 
-  const isAdmin = currentUser?.role === 'admin';
+  const toggleUserStatus = useCallback(async (id: string) => {
+    try {
+      const result = await apiRequest<{ account: Account | null }>('/api/admin/users', {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'status', id }),
+      });
+      if (result.account) {
+        setAccounts((previous) =>
+          previous.map((item) => (item.id === id ? result.account! : item)),
+        );
+      }
+    } catch {
+      // Leave the row untouched when the request fails.
+    }
+  }, []);
+
+  const toggleUserVerified = useCallback(async (id: string) => {
+    try {
+      const result = await apiRequest<{ account: Account | null }>('/api/admin/users', {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'verify', id }),
+      });
+      if (result.account) {
+        setAccounts((previous) =>
+          previous.map((item) => (item.id === id ? result.account! : item)),
+        );
+      }
+    } catch {
+      // Leave the row untouched when the request fails.
+    }
+  }, []);
+
+  const changeAdminPassword = useCallback(
+    async (current: string, next: string): Promise<AuthResult> => {
+      if (next.length < 6) {
+        return { ok: false, error: 'New password must be at least 6 characters.' };
+      }
+      const result = await authClient.changePassword({
+        currentPassword: current,
+        newPassword: next,
+        revokeOtherSessions: false,
+      });
+      if (result.error) {
+        const message = result.error.message ?? 'Unable to update password.';
+        return {
+          ok: false,
+          error: message.toLowerCase().includes('invalid')
+            ? 'Current password is incorrect.'
+            : message,
+        };
+      }
+      return { ok: true };
+    },
+    [],
+  );
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -459,7 +449,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       toggleUserStatus,
       toggleUserVerified,
       changeAdminPassword,
-      adminPassword,
+      adminPassword: '',
     }),
     [
       hydrated,
@@ -480,7 +470,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       toggleUserStatus,
       toggleUserVerified,
       changeAdminPassword,
-      adminPassword,
     ],
   );
 

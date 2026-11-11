@@ -100,7 +100,7 @@ function Field({
 
 export default function AuthScreen() {
   const { theme, theme: palette } = useApp();
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { signIn, signUp } = useAuth();
   const { width, height } = useWindowDimensions();
   const router = useRouter();
   const desktop = width >= 1000;
@@ -122,12 +122,6 @@ export default function AuthScreen() {
   const [busy, setBusy] = useState(false);
 
   const [forgotOpen, setForgotOpen] = useState(false);
-  const [forgotId, setForgotId] = useState('');
-  const [forgotPass, setForgotPass] = useState('');
-  const [forgotConfirm, setForgotConfirm] = useState('');
-  const [forgotMessage, setForgotMessage] = useState<{ tone: 'error' | 'success'; text: string } | null>(
-    null,
-  );
 
   const countriesLabel = useMemo(() => COUNTRIES.length, []);
 
@@ -138,22 +132,27 @@ export default function AuthScreen() {
     setConfirm('');
   };
 
-  const submit = () => {
+  const submit = async () => {
     setError('');
 
     if (mode === 'login') {
       if (!identifier.trim() || !password) {
-        setError('Enter your username, email or phone number and password.');
+        setError('Enter your username or email and password.');
         return;
       }
       setBusy(true);
-      const result = signIn(identifier, password);
-      setBusy(false);
-      if (!result.ok) {
-        setError(result.error ?? 'Unable to sign in.');
-        return;
+      try {
+        const result = await signIn(identifier, password);
+        if (!result.ok) {
+          setError(result.error ?? 'Unable to sign in.');
+          return;
+        }
+        router.replace((result.role === 'admin' ? '/admin' : '/(tabs)') as never);
+      } catch {
+        setError('Unable to reach the server. Please try again.');
+      } finally {
+        setBusy(false);
       }
-      router.replace((result.role === 'admin' ? '/admin' : '/(tabs)') as never);
       return;
     }
 
@@ -167,39 +166,25 @@ export default function AuthScreen() {
     }
 
     setBusy(true);
-    const result = signUp({
-      name,
-      username,
-      email,
-      phone,
-      password,
-      country,
-    });
-    setBusy(false);
-    if (!result.ok) {
-      setError(result.error ?? 'Unable to create the account.');
-      return;
+    try {
+      const result = await signUp({
+        name,
+        username,
+        email,
+        phone,
+        password,
+        country,
+      });
+      if (!result.ok) {
+        setError(result.error ?? 'Unable to create the account.');
+        return;
+      }
+      router.replace('/(tabs)' as never);
+    } catch {
+      setError('Unable to reach the server. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    router.replace('/(tabs)' as never);
-  };
-
-  const submitForgot = () => {
-    if (forgotPass !== forgotConfirm) {
-      setForgotMessage({ tone: 'error', text: 'Passwords do not match.' });
-      return;
-    }
-    const result = resetPassword(forgotId, forgotPass);
-    if (!result.ok) {
-      setForgotMessage({ tone: 'error', text: result.error ?? 'Unable to reset password.' });
-      return;
-    }
-    setForgotMessage({
-      tone: 'success',
-      text: 'Password updated. You can now sign in with your new password.',
-    });
-    setForgotId('');
-    setForgotPass('');
-    setForgotConfirm('');
   };
 
   const form = (
@@ -250,10 +235,10 @@ export default function AuthScreen() {
       {mode === 'login' ? (
         <>
           <Field
-            label="Username, email or phone"
+            label="Username or email"
             value={identifier}
             onChangeText={setIdentifier}
-            placeholder="e.g. maya.k or +8801712345678"
+            placeholder="e.g. maya.k or you@example.com"
             icon={AtSign}
             autoCapitalize="none"
             theme={palette}
@@ -575,89 +560,40 @@ export default function AuthScreen() {
 
       <Sheet
         visible={forgotOpen}
-        onClose={() => {
-          setForgotOpen(false);
-          setForgotMessage(null);
-        }}
-        title="Reset your password"
-        subtitle="Set a new password for your account"
+        onClose={() => setForgotOpen(false)}
+        title="Forgot your password?"
+        subtitle="Recover access to your account"
         maxWidth={420}
         footer={
           <Pressable
-            onPress={submitForgot}
+            onPress={() => setForgotOpen(false)}
             style={({ pressed }) => [
               styles.sheetAction,
               { backgroundColor: theme.accent },
               pressed && { opacity: 0.82 },
             ]}
           >
-            <Text style={styles.sheetActionText}>Update password</Text>
+            <Text style={styles.sheetActionText}>Got it</Text>
           </Pressable>
         }
       >
-        {forgotMessage ? (
-          <View
-            style={[
-              styles.alert,
-              {
-                backgroundColor:
-                  forgotMessage.tone === 'error'
-                    ? theme.mode === 'dark'
-                      ? '#3a1a1c'
-                      : '#fdeceb'
-                    : theme.mode === 'dark'
-                      ? '#0f3d34'
-                      : '#e7f8f1',
-                marginBottom: 14,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.alertText,
-                { color: forgotMessage.tone === 'error' ? theme.danger : theme.accentDark },
-              ]}
-            >
-              {forgotMessage.text}
-            </Text>
-          </View>
-        ) : null}
-        <Text style={[styles.sheetLabel, { color: theme.textSecondary }]}>USERNAME OR EMAIL</Text>
-        <TextInput
-          value={forgotId}
-          onChangeText={setForgotId}
-          placeholder="Your username or email"
-          placeholderTextColor={theme.textMuted}
-          autoCapitalize="none"
-          style={[styles.sheetInput, { backgroundColor: theme.chip, color: theme.text }]}
-        />
-        <Text style={[styles.sheetLabel, { color: theme.textSecondary, marginTop: 14 }]}>
-          NEW PASSWORD
-        </Text>
-        <TextInput
-          value={forgotPass}
-          onChangeText={setForgotPass}
-          placeholder="At least 6 characters"
-          placeholderTextColor={theme.textMuted}
-          secureTextEntry
-          autoCapitalize="none"
-          style={[styles.sheetInput, { backgroundColor: theme.chip, color: theme.text }]}
-        />
-        <Text style={[styles.sheetLabel, { color: theme.textSecondary, marginTop: 14 }]}>
-          CONFIRM PASSWORD
-        </Text>
-        <TextInput
-          value={forgotConfirm}
-          onChangeText={setForgotConfirm}
-          placeholder="Repeat new password"
-          placeholderTextColor={theme.textMuted}
-          secureTextEntry
-          autoCapitalize="none"
-          style={[styles.sheetInput, { backgroundColor: theme.chip, color: theme.text }]}
-        />
+        <View
+          style={[
+            styles.alert,
+            {
+              backgroundColor: theme.mode === 'dark' ? '#0f3d34' : '#e7f8f1',
+              marginBottom: 14,
+            },
+          ]}
+        >
+          <Text style={[styles.alertText, { color: theme.accentDark }]}>
+            Passwords are reset by the platform administrator. Ask the administrator to open the
+            Admin Center, find your account and use “Reset password” — you will receive a temporary
+            password to sign in with.
+          </Text>
+        </View>
         <Text style={[styles.sheetNote, { color: theme.textMuted }]}>
-          Admin accounts are protected — the built-in administrator password can be changed from
-          the admin panel.
+          Once you are signed in again, you can set a new password from Settings → Security.
         </Text>
       </Sheet>
     </SafeAreaView>

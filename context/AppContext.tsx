@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   useCallback,
@@ -9,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { useAuth } from './AuthContext';
+import { apiRequest } from '../lib/client';
 import { seedState } from '../lib/data';
 import { Palette, palettes } from '../lib/theme';
 import {
@@ -24,8 +24,6 @@ import {
   StatusGroup,
   ThemeMode,
 } from '../lib/types';
-
-const STORAGE_KEY = 'whatsapp-web-clone-state-v2';
 
 type ChatFlag = 'pinned' | 'muted' | 'archived' | 'favorite';
 
@@ -75,6 +73,8 @@ interface AppContextValue {
   deleteStatusGroup: (statusId: string) => void;
   deleteCommunity: (communityId: string) => void;
   updateCommunityAnnouncement: (communityId: string, announcement: string) => void;
+  syncError: string | null;
+  dismissSyncError: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -137,48 +137,139 @@ function mergeStoredState(stored: AppState): AppState {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { currentUser } = useAuth();
+  const { currentUser, signOut } = useAuth();
   const [state, setState] = useState<AppState>(seedState);
   const [hydrated, setHydrated] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ChatFilter>('all');
   const [query, setQuery] = useState('');
   const [typing, setTyping] = useState<TypingState | null>(null);
   const activeChatRef = useRef(activeChatId);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastServerUpdate = useRef<string | null>(null);
+  const pendingSave = useRef(false);
+  const skipPersistUntil = useRef(0);
+  const currentUserId = currentUser?.id ?? null;
 
   useEffect(() => {
     activeChatRef.current = activeChatId;
   }, [activeChatId]);
 
   useEffect(() => {
-    let mounted = true;
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
-        if (!mounted) return;
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw) as AppState;
-            setState(mergeStoredState(parsed));
-          } catch {
-            setState(seedState);
-          }
-        }
+    let cancelled = false;
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    pendingSave.current = false;
+    lastServerUpdate.current = null;
+
+    if (!currentUserId) {
+      setState(seedState);
+      setHydrated(true);
+      return;
+    }
+
+    setHydrated(false);
+
+    apiRequest<{ state: AppState; updatedAt: string }>('/api/state')
+      .then((result) => {
+        if (cancelled) return;
+        skipPersistUntil.current = Date.now() + 1500;
+        lastServerUpdate.current = result.updatedAt;
+        setState(mergeStoredState(result.state));
+        setHydrated(true);
       })
-      .finally(() => {
-        if (mounted) setHydrated(true);
+      .catch((error) => {
+        if (cancelled) return;
+        setState(seedState);
+        setHydrated(true);
+        const message = error instanceof Error ? error.message : '';
+        if (message.toLowerCase().includes('suspended')) {
+          void signOut();
+        } else {
+          setSyncError(message || 'Unable to load your synced data.');
+        }
       });
 
     return () => {
-      mounted = false;
-      timers.current.forEach(clearTimeout);
+      cancelled = true;
     };
-  }, []);
+  }, [currentUserId, signOut]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => undefined);
-  }, [state, hydrated]);
+    if (!hydrated || !currentUserId) return;
+    if (Date.now() < skipPersistUntil.current) {
+      skipPersistUntil.current = 0;
+      return;
+    }
+
+    const snapshot = state;
+    const timeout = setTimeout(() => {
+      pendingSave.current = true;
+      apiRequest<{ updatedAt: string }>('/api/state', {
+        method: 'PUT',
+        body: JSON.stringify({ state: snapshot }),
+      })
+        .then((result) => {
+          lastServerUpdate.current = result.updatedAt;
+          setSyncError(null);
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : '';
+          if (message.toLowerCase().includes('suspended')) {
+            void signOut();
+          } else {
+            setSyncError(message || 'Unable to save your changes.');
+          }
+        })
+        .finally(() => {
+          pendingSave.current = false;
+        });
+    }, 700);
+
+    return () => clearTimeout(timeout);
+  }, [state, hydrated, currentUserId, signOut]);
+
+  useEffect(() => {
+    if (!hydrated || !currentUserId) return;
+    let cancelled = false;
+
+    const tick = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (pendingSave.current) return;
+
+      try {
+        const result = await apiRequest<{ state: AppState; updatedAt: string }>('/api/state');
+        if (cancelled || pendingSave.current) return;
+        if (result.updatedAt !== lastServerUpdate.current) {
+          skipPersistUntil.current = Date.now() + 1500;
+          lastServerUpdate.current = result.updatedAt;
+          setState(mergeStoredState(result.state));
+        }
+      } catch {
+        // A later poll will retry; avoid noisy banners for transient failures.
+      }
+    };
+
+    const interval = setInterval(tick, 7000);
+    const onVisible = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        void tick();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisible);
+    }
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible);
+      }
+    };
+  }, [hydrated, currentUserId]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -610,6 +701,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const dismissSyncError = useCallback(() => setSyncError(null), []);
+
   const theme = palettes[state.theme];
 
   const value = useMemo<AppContextValue>(
@@ -644,6 +737,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteStatusGroup,
       deleteCommunity,
       updateCommunityAnnouncement,
+      syncError,
+      dismissSyncError,
       theme,
     }),
     [
@@ -675,6 +770,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deleteStatusGroup,
       deleteCommunity,
       updateCommunityAnnouncement,
+      syncError,
+      dismissSyncError,
       theme,
     ],
   );
