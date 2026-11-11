@@ -44,8 +44,9 @@ import {
 } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { formatClock, formatDateLabel } from '../lib/format';
-import { Chat, Message, ReplyTo } from '../lib/types';
+import { CallParticipant, Chat, Message, ReplyTo } from '../lib/types';
 import { Avatar } from './Avatar';
+import { CallOverlay } from './CallOverlay';
 import { Sheet } from './Sheet';
 
 interface ChatWindowProps {
@@ -105,6 +106,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [callType, setCallType] = useState<'voice' | 'video' | null>(null);
   const listRef = useRef<FlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
   const messages = state.messages[chat.id] ?? [];
@@ -121,6 +123,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     setSearchQuery('');
     setPlayingId(null);
     setRecording(false);
+    setCallType(null);
   }, [chat.id]);
 
   useEffect(() => {
@@ -434,6 +437,13 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
 
   const lastImages = messages.filter((message) => message.image).slice(-4);
 
+  const callParticipants: CallParticipant[] = chat.group
+    ? state.chats
+        .filter((item) => !item.group && item.id !== 'self' && item.id !== chat.id)
+        .slice(0, 3)
+        .map((item) => ({ id: item.id, name: item.name, avatar: item.avatar }))
+    : [];
+
   return (
     <View
       style={[styles.container, { backgroundColor: theme.chatBg }]}
@@ -494,6 +504,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Video call"
+            onPress={() => setCallType('video')}
             style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.65 }]}
           >
             <Video color={theme.icon} size={20} />
@@ -501,6 +512,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Voice call"
+            onPress={() => setCallType('voice')}
             style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.65 }]}
           >
             <Phone color={theme.icon} size={19} />
@@ -1028,6 +1040,18 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           </View>
         ) : null}
       </Sheet>
+
+      {callType ? (
+        <CallOverlay
+          visible={Boolean(callType)}
+          contactId={chat.id}
+          name={chat.name}
+          avatar={chat.avatar}
+          type={callType}
+          participants={callParticipants}
+          onClose={() => setCallType(null)}
+        />
+      ) : null}
     </View>
   );
 }

@@ -106,3 +106,48 @@ export interface AppState {
   communities: Community[];
   user: AppUser;
 }
+
+export type AccountRole = 'user' | 'admin';
+
+export type AccountStatus = 'active' | 'suspended';
+
+export interface Account {
+  id: string;
+  name: string;
+  username: string;
+  email: string;
+  phone: string;
+  countryCode: string;
+  countryName: string;
+  passwordHash: string;
+  role: AccountRole;
+  status: AccountStatus;
+  verified: boolean;
+  about: string;
+  avatar?: string;
+  createdAt: string;
+  lastActiveAt: string;
+}
+
+export interface Broadcast {
+  id: string;
+  title: string;
+  message: string;
+  audience: 'everyone' | 'active' | 'suspended';
+  createdAt: string;
+  sentBy: string;
+}
+
+export interface Country {
+  iso: string;
+  name: string;
+  dial: string;
+  flag: string;
+}
+
+export interface CallParticipant {
+  id: string;
+  name: string;
+  avatar?: string;
+  muted?: boolean;
+}

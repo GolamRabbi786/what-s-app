@@ -1,6 +1,7 @@
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  Check,
   Clock,
   Lock,
   MoreVertical,
@@ -9,6 +10,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Users,
   Video,
   X,
 } from 'lucide-react-native';
@@ -45,6 +47,7 @@ interface CallTarget {
   name: string;
   avatar?: string;
   type: 'voice' | 'video';
+  participants?: { id: string; name: string; avatar?: string }[];
 }
 
 function CallsHome() {
@@ -57,6 +60,8 @@ function CallsHome() {
   const [search, setSearch] = useState('');
   const [callType, setCallType] = useState<'voice' | 'video'>('voice');
   const [callTarget, setCallTarget] = useState<CallTarget | null>(null);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [groupSelected, setGroupSelected] = useState<string[]>([]);
 
   const contacts = state.chats.filter((chat) => !chat.group && chat.id !== 'self');
 
@@ -129,6 +134,17 @@ function CallsHome() {
               >
                 <Plus color="#ffffff" size={17} />
                 {wide ? <Text style={styles.newButtonText}>New call</Text> : null}
+              </Pressable>
+              <Pressable
+                onPress={() => setGroupOpen(true)}
+                accessibilityLabel="New group call"
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  { backgroundColor: theme.chip },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Users color={theme.icon} size={19} />
               </Pressable>
               <Pressable
                 onPress={() => setMenuOpen(true)}
@@ -449,6 +465,109 @@ function CallsHome() {
         </View>
       </Sheet>
 
+      <Sheet
+        visible={groupOpen}
+        onClose={() => setGroupOpen(false)}
+        title="New group call"
+        subtitle="Pick at least two people to start a video call"
+        maxWidth={420}
+        footer={
+          <Pressable
+            disabled={groupSelected.length < 2}
+            onPress={() => {
+              const chosen = contacts.filter((contact) => groupSelected.includes(contact.id));
+              if (chosen.length < 2) return;
+              setGroupOpen(false);
+              setGroupSelected([]);
+              setCallTarget({
+                contactId: 'group-call',
+                name: 'Team huddle',
+                type: 'video',
+                participants: chosen.map((contact) => ({
+                  id: contact.id,
+                  name: contact.name,
+                  avatar: contact.avatar,
+                })),
+              });
+            }}
+            style={({ pressed }) => [
+              styles.groupStart,
+              {
+                backgroundColor:
+                  groupSelected.length < 2 ? theme.chip : theme.accent,
+              },
+              pressed && groupSelected.length >= 2 && { opacity: 0.82 },
+            ]}
+          >
+            <Video
+              color={groupSelected.length < 2 ? theme.textMuted : '#ffffff'}
+              size={16}
+            />
+            <Text
+              style={[
+                styles.groupStartText,
+                { color: groupSelected.length < 2 ? theme.textMuted : '#ffffff' },
+              ]}
+            >
+              Start group call
+              {groupSelected.length > 0 ? ` · ${groupSelected.length + 1} people` : ''}
+            </Text>
+          </Pressable>
+        }
+      >
+        <Text style={[styles.groupHint, { color: theme.textSecondary }]}>
+          You will join with camera and microphone controls, plus screen sharing.
+        </Text>
+        {contacts.map((contact) => {
+          const active = groupSelected.includes(contact.id);
+          return (
+            <Pressable
+              key={contact.id}
+              onPress={() =>
+                setGroupSelected((current) =>
+                  current.includes(contact.id)
+                    ? current.filter((id) => id !== contact.id)
+                    : [...current, contact.id],
+                )
+              }
+              style={({ pressed }) => [
+                styles.groupRow,
+                {
+                  backgroundColor: active ? theme.chipActive : theme.panelAlt,
+                  borderColor: active ? theme.accent : theme.border,
+                },
+                pressed && { opacity: 0.75 },
+              ]}
+            >
+              <Avatar
+                name={contact.name}
+                uri={contact.avatar}
+                size={38}
+                online={contact.online}
+                showOnline
+              />
+              <View style={styles.contactText}>
+                <Text style={[styles.contactName, { color: theme.text }]}>{contact.name}</Text>
+                <Text style={[styles.contactSub, { color: theme.textSecondary }]}>
+                  {contact.online ? 'online now' : contact.about ?? 'WhatsApp contact'}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.groupCheck,
+                  {
+                    backgroundColor: active ? theme.accent : 'transparent',
+                    borderColor: active ? theme.accent : theme.textMuted,
+                  },
+                ]}
+              >
+                {active ? <Check color="#ffffff" size={13} strokeWidth={3} /> : null}
+              </View>
+            </Pressable>
+          );
+        })}
+      </Sheet>
+
       {callTarget ? (
         <CallOverlay
           visible={Boolean(callTarget)}
@@ -456,6 +575,7 @@ function CallsHome() {
           name={callTarget.name}
           avatar={callTarget.avatar}
           type={callTarget.type}
+          participants={callTarget.participants}
           onClose={() => setCallTarget(null)}
         />
       ) : null}
@@ -863,6 +983,40 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 10,
+    marginBottom: 8,
+    borderRadius: 11,
+    borderWidth: 1.2,
+  },
+  groupCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  groupHint: {
+    fontSize: 11.5,
+    lineHeight: 17,
+    marginBottom: 10,
+  },
+  groupStart: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 44,
+    borderRadius: 10,
+  },
+  groupStartText: {
+    fontSize: 13.5,
+    fontWeight: '800',
   },
   contactEmpty: {
     alignItems: 'center',

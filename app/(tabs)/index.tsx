@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Laptop,
   Lock,
+  Megaphone,
   MessageCircle,
   MessageSquarePlus,
   MoreVertical,
@@ -41,6 +42,7 @@ import { ChatWindow } from '../../components/ChatWindow';
 import { NewChatModal } from '../../components/NewChatModal';
 import { Sheet } from '../../components/Sheet';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { formatChatTime, getChatPreview } from '../../lib/format';
 import { Chat } from '../../lib/types';
 
@@ -70,6 +72,8 @@ function ChatsHome() {
   const { width } = useWindowDimensions();
   const desktop = width >= 900;
   const router = useRouter();
+  const { broadcasts } = useAuth();
+  const [dismissedBroadcast, setDismissedBroadcast] = useState<string | null>(null);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -229,6 +233,37 @@ function ChatsHome() {
             );
           })}
         </ScrollView>
+
+        {broadcasts.length > 0 && dismissedBroadcast !== broadcasts[0].id ? (
+          <View
+            style={[
+              styles.broadcastBanner,
+              { backgroundColor: theme.chipActive, borderColor: theme.accent },
+            ]}
+          >
+            <View style={[styles.broadcastIcon, { backgroundColor: theme.accent }]}>
+              <Megaphone color="#ffffff" size={15} />
+            </View>
+            <View style={styles.broadcastBody}>
+              <Text style={[styles.broadcastTitle, { color: theme.text }]} numberOfLines={1}>
+                {broadcasts[0].title}
+              </Text>
+              <Text
+                style={[styles.broadcastText, { color: theme.textSecondary }]}
+                numberOfLines={2}
+              >
+                {broadcasts[0].message}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setDismissedBroadcast(broadcasts[0].id)}
+              hitSlop={8}
+              accessibilityLabel="Dismiss announcement"
+            >
+              <X color={theme.textMuted} size={15} />
+            </Pressable>
+          </View>
+        ) : null}
 
         {archivedChats.length > 0 && !query ? (
           <Pressable
@@ -725,6 +760,36 @@ const styles = StyleSheet.create({
   chipCountText: {
     fontSize: 9,
     fontWeight: '700',
+  },
+  broadcastBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 9,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    padding: 10,
+    borderRadius: 11,
+    borderWidth: 1,
+  },
+  broadcastIcon: {
+    width: 27,
+    height: 27,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  broadcastBody: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  broadcastTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+  },
+  broadcastText: {
+    fontSize: 10.5,
+    lineHeight: 15,
   },
   archivedRow: {
     flexDirection: 'row',

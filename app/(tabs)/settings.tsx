@@ -18,6 +18,7 @@ import {
   Laptop,
   Link2,
   Lock,
+  LogOut,
   MessageCircle,
   Moon,
   Palette,
@@ -33,6 +34,7 @@ import {
   Wifi,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Alert,
@@ -49,6 +51,7 @@ import { AppShell } from '../../components/AppShell';
 import { Avatar } from '../../components/Avatar';
 import { Sheet } from '../../components/Sheet';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { AVATARS } from '../../lib/data';
 
 export default function SettingsScreen() {
@@ -106,12 +109,14 @@ const FAQS = [
   {
     question: 'How do I delete my account?',
     answer:
-      'Account deletion is available in the full WhatsApp app under Settings → Account → Delete my account. This local demo does not create a real account.',
+      'Contact the platform administrator to delete your account. Once removed, you will no longer be able to sign in with those details.',
   },
 ];
 
 function SettingsHome() {
   const { theme, state, setTheme, updateUser } = useApp();
+  const { currentUser, isAdmin, signOut, updateProfile } = useAuth();
+  const router = useRouter();
   const { width } = useWindowDimensions();
   const wide = width >= 1060;
   const [editOpen, setEditOpen] = useState(false);
@@ -154,6 +159,11 @@ function SettingsHome() {
       about: editAbout.trim(),
       avatar: editAvatar,
     });
+    updateProfile({
+      name: editName.trim(),
+      about: editAbout.trim(),
+      avatar: editAvatar,
+    });
     setEditOpen(false);
   };
 
@@ -183,7 +193,7 @@ function SettingsHome() {
             <View style={[styles.demoPill, { backgroundColor: theme.chip }]}>
               <Info color={theme.textMuted} size={13} />
               <Text style={[styles.demoPillText, { color: theme.textSecondary }]}>
-                Demo account
+                @{currentUser?.username ?? 'account'}
               </Text>
             </View>
           </View>
@@ -343,6 +353,35 @@ function SettingsHome() {
                       'A WhatsApp-inspired web experience built with Expo and React Native. All conversations are stored locally in your browser.',
                     )
                   }
+                  last
+                />
+              </SettingsSection>
+
+              <SettingsSection title="Session" theme={theme}>
+                {isAdmin ? (
+                  <SettingsRow
+                    icon={ShieldCheck}
+                    iconBg="rgba(0,168,132,0.14)"
+                    iconColor={theme.accentDark}
+                    title="Admin panel"
+                    subtitle="Manage users, content, calls and broadcasts"
+                    onPress={() => router.push('/admin' as never)}
+                  />
+                ) : null}
+                <SettingsRow
+                  icon={LogOut}
+                  iconBg="rgba(234,67,53,0.12)"
+                  iconColor={theme.danger}
+                  title="Log out"
+                  subtitle={
+                    currentUser
+                      ? `Signed in as @${currentUser.username}`
+                      : 'Sign out of this device'
+                  }
+                  onPress={() => {
+                    signOut();
+                    router.replace('/auth' as never);
+                  }}
                   last
                 />
               </SettingsSection>

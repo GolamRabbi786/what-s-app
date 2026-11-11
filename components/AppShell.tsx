@@ -5,6 +5,7 @@ import {
   Moon,
   Phone,
   Settings,
+  ShieldCheck,
   Sun,
   Users,
 } from 'lucide-react-native';
@@ -18,6 +19,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { Avatar } from './Avatar';
 
 export type TabKey = 'chats' | 'updates' | 'communities' | 'calls' | 'settings';
@@ -44,6 +46,7 @@ interface AppShellProps {
 
 export function AppShell({ active, children }: AppShellProps) {
   const { theme, state, toggleTheme } = useApp();
+  const { isAdmin } = useAuth();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -121,6 +124,20 @@ export function AppShell({ active, children }: AppShellProps) {
           </View>
 
           <View style={styles.railBottom}>
+            {isAdmin ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open admin panel"
+                onPress={() => router.push('/admin' as never)}
+                style={({ pressed }) => [
+                  styles.themeButton,
+                  { backgroundColor: theme.accentSoft },
+                  pressed && { opacity: 0.72 },
+                ]}
+              >
+                <ShieldCheck color={theme.accentDark} size={18} />
+              </Pressable>
+            ) : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Toggle dark mode"

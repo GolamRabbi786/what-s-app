@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useAuth } from './AuthContext';
 import { seedState } from '../lib/data';
 import { Palette, palettes } from '../lib/theme';
 import {
@@ -70,6 +71,10 @@ interface AppContextValue {
   clearCalls: () => void;
   createGroup: (name: string, memberIds: string[], avatar?: string) => string;
   createCommunity: (name: string, description: string) => string;
+  deleteChat: (chatId: string) => void;
+  deleteStatusGroup: (statusId: string) => void;
+  deleteCommunity: (communityId: string) => void;
+  updateCommunityAnnouncement: (communityId: string, announcement: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -132,6 +137,7 @@ function mergeStoredState(stored: AppState): AppState {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const { currentUser } = useAuth();
   const [state, setState] = useState<AppState>(seedState);
   const [hydrated, setHydrated] = useState(false);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -173,6 +179,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!hydrated) return;
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => undefined);
   }, [state, hydrated]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const fullPhone = `${currentUser.countryCode} ${currentUser.phone}`;
+    setState((prev) => {
+      const nextAvatar = currentUser.avatar ?? prev.user.avatar;
+      if (
+        prev.user.name === currentUser.name &&
+        prev.user.phone === fullPhone &&
+        prev.user.about === (currentUser.about || prev.user.about) &&
+        prev.user.avatar === nextAvatar
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        user: {
+          ...prev.user,
+          name: currentUser.name,
+          phone: fullPhone,
+          about: currentUser.about || prev.user.about,
+          avatar: nextAvatar,
+        },
+      };
+    });
+  }, [
+    currentUser?.id,
+    currentUser?.name,
+    currentUser?.phone,
+    currentUser?.about,
+    currentUser?.avatar,
+    currentUser?.countryCode,
+  ]);
 
   useEffect(() => {
     if (!typing) return;
@@ -535,6 +574,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, []);
 
+  const deleteChat = useCallback((chatId: string) => {
+    setState((prev) => {
+      const messages = { ...prev.messages };
+      delete messages[chatId];
+      return {
+        ...prev,
+        chats: prev.chats.filter((chat) => chat.id !== chatId),
+        messages,
+      };
+    });
+    if (activeChatRef.current === chatId) setActiveChatId(null);
+  }, []);
+
+  const deleteStatusGroup = useCallback((statusId: string) => {
+    setState((prev) => ({
+      ...prev,
+      statuses: prev.statuses.filter((status) => status.id !== statusId),
+    }));
+  }, []);
+
+  const deleteCommunity = useCallback((communityId: string) => {
+    setState((prev) => ({
+      ...prev,
+      communities: prev.communities.filter((community) => community.id !== communityId),
+    }));
+  }, []);
+
+  const updateCommunityAnnouncement = useCallback((communityId: string, announcement: string) => {
+    setState((prev) => ({
+      ...prev,
+      communities: prev.communities.map((community) =>
+        community.id === communityId ? { ...community, announcement } : community,
+      ),
+    }));
+  }, []);
+
   const theme = palettes[state.theme];
 
   const value = useMemo<AppContextValue>(
@@ -565,6 +640,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearCalls,
       createGroup,
       createCommunity,
+      deleteChat,
+      deleteStatusGroup,
+      deleteCommunity,
+      updateCommunityAnnouncement,
       theme,
     }),
     [
@@ -592,6 +671,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearCalls,
       createGroup,
       createCommunity,
+      deleteChat,
+      deleteStatusGroup,
+      deleteCommunity,
+      updateCommunityAnnouncement,
       theme,
     ],
   );
