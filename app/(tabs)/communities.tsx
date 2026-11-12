@@ -102,16 +102,16 @@ function CommunitiesHome() {
     );
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!name.trim()) return;
-    const id = createCommunity(
+    const id = await createCommunity(
       name.trim(),
       description.trim() || 'A new community for people to connect and share updates.',
     );
     setName('');
     setDescription('');
     setCreateOpen(false);
-    setSelectedId(id);
+    if (id) setSelectedId(id);
   };
 
   const closeCreate = () => {

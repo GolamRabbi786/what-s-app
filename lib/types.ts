@@ -40,12 +40,25 @@ export interface Chat {
   lastSeen?: string;
   about?: string;
   phone?: string;
+  peerId?: string;
+  username?: string;
   unread: number;
   pinned?: boolean;
   muted?: boolean;
   archived?: boolean;
   favorite?: boolean;
   lastMessageAt: string;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  username: string;
+  phone: string;
+  about: string;
+  avatar?: string;
+  online: boolean;
+  lastSeen?: string;
 }
 
 export interface StatusItem {
@@ -104,6 +117,7 @@ export interface AppState {
   statuses: StatusGroup[];
   calls: CallLog[];
   communities: Community[];
+  contacts: Contact[];
   user: AppUser;
 }
 

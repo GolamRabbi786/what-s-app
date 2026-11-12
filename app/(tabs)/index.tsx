@@ -39,6 +39,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppShell } from '../../components/AppShell';
 import { Avatar } from '../../components/Avatar';
 import { ChatWindow } from '../../components/ChatWindow';
+import { FadeSlideIn, Pulse } from '../../components/Motion';
+import { ChatListSkeleton } from '../../components/Skeleton';
 import { NewChatModal } from '../../components/NewChatModal';
 import { Sheet } from '../../components/Sheet';
 import { useApp } from '../../context/AppContext';
@@ -58,6 +60,7 @@ function ChatsHome() {
   const {
     theme,
     state,
+    hydrated,
     activeChatId,
     openChat,
     closeChat,
@@ -284,19 +287,24 @@ function ChatsHome() {
           </Pressable>
         ) : null}
 
+        {!hydrated ? (
+          <ChatListSkeleton theme={theme} />
+        ) : (
         <FlatList
           data={visibleChats}
           keyExtractor={(chat) => chat.id}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={visibleChats.length === 0 ? styles.emptyListContent : styles.listContent}
-          renderItem={({ item }) => (
-            <ChatRow
-              chat={item}
-              active={activeChatId === item.id}
-              typingLabel={typing?.chatId === item.id ? typing.label : null}
-              preview={getChatPreview(item, state.messages)}
-              onPress={() => openChat(item.id)}
-            />
+          renderItem={({ item, index }) => (
+            <FadeSlideIn delay={Math.min(index, 9) * 45} offset={10}>
+              <ChatRow
+                chat={item}
+                active={activeChatId === item.id}
+                typingLabel={typing?.chatId === item.id ? typing.label : null}
+                preview={getChatPreview(item, state.messages)}
+                onPress={() => openChat(item.id)}
+              />
+            </FadeSlideIn>
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -341,6 +349,7 @@ function ChatsHome() {
             </View>
           }
         />
+        )}
       </View>
 
       {desktop ? (
@@ -618,6 +627,7 @@ function WelcomePane({ userName }: { userName: string }) {
     <View style={[styles.welcome, { backgroundColor: theme.panelAlt }]}>
       <View style={styles.welcomeDecorationOne} />
       <View style={styles.welcomeDecorationTwo} />
+      <FadeSlideIn delay={60} offset={18} style={{ width: '100%', maxWidth: 470 }}>
       <View
         style={[
           styles.welcomeCard,
@@ -628,9 +638,11 @@ function WelcomePane({ userName }: { userName: string }) {
           },
         ]}
       >
-        <View style={[styles.welcomeLogo, { backgroundColor: theme.accent }]}>
-          <MessageCircle color="#ffffff" size={44} strokeWidth={2} />
-        </View>
+        <Pulse min={0.96} max={1.05} duration={2800}>
+          <View style={[styles.welcomeLogo, { backgroundColor: theme.accent }]}>
+            <MessageCircle color="#ffffff" size={44} strokeWidth={2} />
+          </View>
+        </Pulse>
         <Text style={[styles.welcomeTitle, { color: theme.text }]}>
           Welcome back, {firstName}
         </Text>
@@ -669,6 +681,7 @@ function WelcomePane({ userName }: { userName: string }) {
           </Text>
         </View>
       </View>
+      </FadeSlideIn>
     </View>
   );
 }

@@ -32,6 +32,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CountryPicker } from '../components/CountryPicker';
+import { FadeIn, FadeSlideIn, Pulse } from '../components/Motion';
 import { Sheet } from '../components/Sheet';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -106,6 +107,7 @@ export default function AuthScreen() {
   const desktop = width >= 1000;
 
   const [mode, setMode] = useState<Mode>('login');
+  const [adminMode, setAdminMode] = useState(false);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -127,6 +129,7 @@ export default function AuthScreen() {
 
   const switchMode = (next: Mode) => {
     setMode(next);
+    setAdminMode(false);
     setError('');
     setPassword('');
     setConfirm('');
@@ -145,6 +148,10 @@ export default function AuthScreen() {
         const result = await signIn(identifier, password);
         if (!result.ok) {
           setError(result.error ?? 'Unable to sign in.');
+          return;
+        }
+        if (adminMode && result.role !== 'admin') {
+          setError('This account does not have administrator access.');
           return;
         }
         router.replace((result.role === 'admin' ? '/admin' : '/(tabs)') as never);
@@ -188,6 +195,7 @@ export default function AuthScreen() {
   };
 
   const form = (
+    <FadeSlideIn delay={90} offset={20}>
     <View style={[styles.formCard, { backgroundColor: theme.panel, borderColor: theme.border }]}>
       <View style={[styles.segment, { backgroundColor: theme.chip }]}>
         {(['login', 'signup'] as Mode[]).map((item) => {
@@ -217,12 +225,18 @@ export default function AuthScreen() {
 
       <View style={styles.formHeading}>
         <Text style={[styles.formTitle, { color: theme.text }]}>
-          {mode === 'login' ? 'Welcome back' : 'Get started on WhatsApp'}
+          {adminMode
+            ? 'Administrator access'
+            : mode === 'login'
+              ? 'Welcome back'
+              : 'Get started on WhatsApp'}
         </Text>
         <Text style={[styles.formSubtitle, { color: theme.textSecondary }]}>
-          {mode === 'login'
-            ? 'Sign in to continue your conversations from any country.'
-            : 'Create your account — works with phone numbers from every country.'}
+          {adminMode
+            ? 'Sign in with the administrator account to manage users, content and broadcasts.'
+            : mode === 'login'
+              ? 'Sign in to continue your conversations from any country.'
+              : 'Create your account — works with phone numbers from every country.'}
         </Text>
       </View>
 
@@ -448,7 +462,42 @@ export default function AuthScreen() {
           {mode === 'login' ? 'Create an account' : 'Sign in'}
         </Text>
       </Text>
+
+      <View style={styles.adminDivider}>
+        <View style={[styles.adminDividerLine, { backgroundColor: theme.border }]} />
+        <Text style={[styles.adminDividerText, { color: theme.textMuted }]}>or</Text>
+        <View style={[styles.adminDividerLine, { backgroundColor: theme.border }]} />
+      </View>
+
+      <Pressable
+        onPress={() => {
+          setAdminMode((value) => !value);
+          setMode('login');
+          setIdentifier('');
+          setPassword('');
+          setError('');
+        }}
+        style={({ pressed }) => [
+          styles.adminLink,
+          { borderColor: adminMode ? theme.accent : theme.border },
+          adminMode && { backgroundColor: theme.chip },
+          pressed && { opacity: 0.78 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Administrator sign in"
+      >
+        <ShieldCheck color={theme.accent} size={16} />
+        <Text style={[styles.adminLinkText, { color: theme.text }]}>
+          {adminMode ? 'Back to user sign in' : 'Administrator sign in'}
+        </Text>
+      </Pressable>
+      {adminMode ? (
+        <Text style={[styles.adminHint, { color: theme.textMuted }]}>
+          Restricted area · only platform administrators can open the Admin Center.
+        </Text>
+      ) : null}
     </View>
+    </FadeSlideIn>
   );
 
   return (
@@ -470,15 +519,22 @@ export default function AuthScreen() {
                 end={{ x: 1, y: 1 }}
                 style={[styles.hero, { minHeight: height - 72 }]}
               >
-                <View style={styles.heroGlowOne} />
-                <View style={styles.heroGlowTwo} />
+                <Pulse style={styles.heroGlowOne} min={0.9} max={1.08} duration={7000}>
+                  <View style={{ flex: 1 }} />
+                </Pulse>
+                <Pulse style={styles.heroGlowTwo} min={0.94} max={1.06} duration={9000}>
+                  <View style={{ flex: 1 }} />
+                </Pulse>
                 <View style={styles.brandRow}>
-                  <View style={styles.brandMark}>
-                    <MessageCircle color="#ffffff" size={24} strokeWidth={2.4} />
-                  </View>
+                  <Pulse min={0.96} max={1.05} duration={2600}>
+                    <View style={styles.brandMark}>
+                      <MessageCircle color="#ffffff" size={24} strokeWidth={2.4} />
+                    </View>
+                  </Pulse>
                   <Text style={styles.brandName}>WhatsApp</Text>
                 </View>
 
+                <FadeSlideIn delay={60} offset={16}>
                 <View style={styles.heroBody}>
                   <View style={styles.heroPill}>
                     <Sparkles color="#d9fdd3" size={13} />
@@ -512,6 +568,7 @@ export default function AuthScreen() {
                     })}
                   </View>
                 </View>
+                </FadeSlideIn>
 
                 <View style={styles.heroFooter}>
                   <View style={styles.avatarStack}>
@@ -533,15 +590,19 @@ export default function AuthScreen() {
             </View>
           ) : (
             <View style={styles.mobileWrap}>
+              <FadeIn>
               <View style={styles.mobileBrand}>
-                <View style={[styles.brandMark, { backgroundColor: theme.accent }]}>
-                  <MessageCircle color="#ffffff" size={22} strokeWidth={2.4} />
-                </View>
+                <Pulse min={0.96} max={1.05} duration={2600}>
+                  <View style={[styles.brandMark, { backgroundColor: theme.accent }]}>
+                    <MessageCircle color="#ffffff" size={22} strokeWidth={2.4} />
+                  </View>
+                </Pulse>
                 <Text style={[styles.mobileBrandName, { color: theme.text }]}>WhatsApp</Text>
                 <Text style={[styles.mobileBrandSub, { color: theme.textSecondary }]}>
                   Simple, reliable, private messaging
                 </Text>
               </View>
+              </FadeIn>
               {form}
               <Text style={[styles.footerNote, { color: theme.textMuted }]}>
                 Works with phone numbers from {countriesLabel} countries and regions.
@@ -991,5 +1052,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 17,
     marginTop: 14,
+  },
+
+  adminDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+  },
+  adminDividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  adminDividerText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  adminLink: {
+    marginTop: 12,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  adminLinkText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  adminHint: {
+    marginTop: 8,
+    fontSize: 10.5,
+    textAlign: 'center',
+    lineHeight: 15,
   },
 });

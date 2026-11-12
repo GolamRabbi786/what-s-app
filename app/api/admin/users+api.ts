@@ -2,7 +2,6 @@ import { desc, eq } from 'drizzle-orm';
 import { auth } from '../../../lib/auth';
 import { db } from '../../../lib/db';
 import { user } from '../../../lib/auth-schema';
-import { appStates } from '../../../lib/schema';
 import {
   badRequest,
   errorMessage,
@@ -174,7 +173,6 @@ export async function DELETE(request: Request) {
       return badRequest('Administrator accounts cannot be deleted.');
     }
 
-    await db.delete(appStates).where(eq(appStates.userId, target.id));
     await db.delete(user).where(eq(user.id, target.id));
 
     return json({ ok: true });

@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { Avatar } from './Avatar';
+import { FadeIn } from './Motion';
 
 export type TabKey = 'chats' | 'updates' | 'communities' | 'calls' | 'settings';
 
@@ -83,12 +84,12 @@ export function AppShell({ active, children }: AppShellProps) {
           </View>
 
           <View style={styles.railNav}>
-            {NAV_ITEMS.map((item) => {
+            {NAV_ITEMS.map((item, index) => {
               const isActive = item.key === active;
               const Icon = item.icon;
               return (
+                <FadeIn key={item.key} delay={index * 55} duration={320}>
                 <Pressable
-                  key={item.key}
                   accessibilityRole="button"
                   accessibilityLabel={item.label}
                   onPress={() => navigate(item)}
@@ -119,6 +120,7 @@ export function AppShell({ active, children }: AppShellProps) {
                     {item.label}
                   </Text>
                 </Pressable>
+                </FadeIn>
               );
             })}
           </View>
@@ -182,12 +184,12 @@ export function AppShell({ active, children }: AppShellProps) {
           },
         ]}
       >
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.map((item, index) => {
           const isActive = item.key === active;
           const Icon = item.icon;
           return (
+            <FadeIn key={item.key} delay={index * 55} duration={320}>
             <Pressable
-              key={item.key}
               accessibilityRole="button"
               accessibilityLabel={item.label}
               onPress={() => navigate(item)}
@@ -224,6 +226,7 @@ export function AppShell({ active, children }: AppShellProps) {
                 {item.label}
               </Text>
             </Pressable>
+            </FadeIn>
           );
         })}
       </View>

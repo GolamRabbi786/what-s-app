@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
+import { playCallEndSound, startRingtone, stopRingtone } from '../lib/sounds';
 import { CallParticipant } from '../lib/types';
 import { Avatar } from './Avatar';
 
@@ -78,9 +79,14 @@ export function CallOverlay({
     setVideoOn(type === 'video');
     setScreenSharing(false);
     setShowPeople(false);
-    const connectTimer = setTimeout(() => setConnected(true), 2100);
+    void startRingtone();
+    const connectTimer = setTimeout(() => {
+      stopRingtone();
+      setConnected(true);
+    }, 2100);
     const interval = setInterval(() => setSeconds((value) => value + 1), 1000);
     return () => {
+      stopRingtone();
       clearTimeout(connectTimer);
       clearInterval(interval);
     };
@@ -94,6 +100,8 @@ export function CallOverlay({
   }, [visible, type, videoOn, permission, requestPermission]);
 
   const endCall = () => {
+    stopRingtone();
+    void playCallEndSound();
     addCall({
       id: `call-${Date.now()}`,
       contactId,

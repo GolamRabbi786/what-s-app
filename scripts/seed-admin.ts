@@ -3,8 +3,6 @@ import { eq } from 'drizzle-orm';
 import { auth } from '../lib/auth';
 import { db } from '../lib/db';
 import { user } from '../lib/auth-schema';
-import { appStates } from '../lib/schema';
-import { buildSeedState } from '../lib/seed';
 
 const ADMIN = {
   name: 'Golam Rabbi',
@@ -68,23 +66,6 @@ async function main() {
       countryName: ADMIN.countryName,
     })
     .where(eq(user.id, admin.id));
-
-  const states = await db
-    .select()
-    .from(appStates)
-    .where(eq(appStates.userId, admin.id))
-    .limit(1);
-
-  if (!states[0]) {
-    await db.insert(appStates).values({
-      userId: admin.id,
-      data: buildSeedState({
-        name: ADMIN.name,
-        about: ADMIN.about,
-        phone: `${ADMIN.countryCode} ${ADMIN.phone}`,
-      }),
-    });
-  }
 
   console.log(`Administrator ready: @${ADMIN.username}`);
 }

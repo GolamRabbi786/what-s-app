@@ -8,6 +8,20 @@
       "when": 1794381652777,
       "tag": "0000_lovely_flatman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794451163252,
+      "tag": "0001_ordinary_franklin_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794451168601,
+      "tag": "0002_groovy_stingray",
+      "breakpoints": true
     }
   ]
 }

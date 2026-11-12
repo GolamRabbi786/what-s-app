@@ -63,7 +63,7 @@ function CallsHome() {
   const [groupOpen, setGroupOpen] = useState(false);
   const [groupSelected, setGroupSelected] = useState<string[]>([]);
 
-  const contacts = state.chats.filter((chat) => !chat.group && chat.id !== 'self');
+  const contacts = state.contacts;
 
   const counts = {
     all: state.calls.length,

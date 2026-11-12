@@ -28,26 +28,25 @@ interface NewChatModalProps {
 }
 
 export function NewChatModal({ visible, onClose }: NewChatModalProps) {
-  const { theme, state, openChat, createGroup } = useApp();
+  const { theme, state, openChat, createGroup, startDirectChat } = useApp();
   const [step, setStep] = useState<'contacts' | 'group'>('contacts');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [groupName, setGroupName] = useState('');
 
-  const contacts = useMemo(
-    () => state.chats.filter((chat) => !chat.group && chat.id !== 'self'),
-    [state.chats],
-  );
+  const contacts = state.contacts;
 
-  const filtered = contacts.filter((contact) => {
+  const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return true;
-    return (
-      contact.name.toLowerCase().includes(query) ||
-      (contact.about ?? '').toLowerCase().includes(query) ||
-      (contact.phone ?? '').includes(query)
+    if (!query) return contacts;
+    return contacts.filter(
+      (contact) =>
+        contact.name.toLowerCase().includes(query) ||
+        contact.about.toLowerCase().includes(query) ||
+        contact.phone.includes(query) ||
+        contact.username.toLowerCase().includes(query),
     );
-  });
+  }, [contacts, search]);
 
   const reset = () => {
     setStep('contacts');
@@ -61,9 +60,10 @@ export function NewChatModal({ visible, onClose }: NewChatModalProps) {
     onClose();
   };
 
-  const startChat = (id: string) => {
-    openChat(id);
+  const startChat = async (id: string) => {
+    const chatId = await startDirectChat(id);
     close();
+    if (chatId) openChat(chatId);
   };
 
   const toggleSelected = (id: string) => {
@@ -72,18 +72,18 @@ export function NewChatModal({ visible, onClose }: NewChatModalProps) {
     );
   };
 
-  const handleCreateGroup = () => {
+  const handleCreateGroup = async () => {
     if (!groupName.trim() || selected.length === 0) return;
-    const id = createGroup(groupName.trim(), selected);
+    const id = await createGroup(groupName.trim(), selected);
     reset();
     onClose();
-    openChat(id);
+    if (id) openChat(id);
   };
 
   const invite = () => {
     Alert.alert(
       'Invite a friend',
-      'Share this link: https://wa.me/919876500123 — they can join the demo conversation.',
+      'Ask them to join this WhatsApp workspace and search for your name or username to start chatting.',
     );
   };
 
@@ -207,7 +207,7 @@ export function NewChatModal({ visible, onClose }: NewChatModalProps) {
                 <View style={styles.contactText}>
                   <Text style={[styles.contactName, { color: theme.text }]}>{contact.name}</Text>
                   <Text style={[styles.contactSub, { color: theme.textSecondary }]} numberOfLines={1}>
-                    {contact.online ? 'online' : contact.about ?? contact.phone ?? 'WhatsApp contact'}
+                    {contact.online ? 'online' : contact.about || contact.phone || 'WhatsApp contact'}
                   </Text>
                 </View>
                 <MessageSquarePlus color={theme.textMuted} size={18} />
@@ -264,7 +264,7 @@ export function NewChatModal({ visible, onClose }: NewChatModalProps) {
                   <View style={styles.contactText}>
                     <Text style={[styles.contactName, { color: theme.text }]}>{contact.name}</Text>
                     <Text style={[styles.contactSub, { color: theme.textSecondary }]} numberOfLines={1}>
-                      {contact.about ?? 'WhatsApp contact'}
+                      {contact.about || 'WhatsApp contact'}
                     </Text>
                   </View>
                   <View

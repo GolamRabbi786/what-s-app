@@ -1,75 +1,5 @@
 import { z } from 'zod';
 
-const chatSchema = z
-  .object({
-    id: z.string().min(1).max(120),
-    name: z.string().max(200),
-    group: z.boolean(),
-    unread: z.number().int().min(0),
-    lastMessageAt: z.string(),
-  })
-  .passthrough();
-
-const messageSchema = z
-  .object({
-    id: z.string().min(1).max(120),
-    chatId: z.string().min(1).max(120),
-    senderId: z.string().max(120),
-    text: z.string().max(8000),
-    createdAt: z.string(),
-    kind: z.string().max(20),
-    status: z.string().max(20),
-  })
-  .passthrough();
-
-const statusGroupSchema = z
-  .object({
-    id: z.string().min(1).max(120),
-    name: z.string().max(200),
-    items: z.array(z.unknown()).max(50),
-  })
-  .passthrough();
-
-const callSchema = z
-  .object({
-    id: z.string().min(1).max(120),
-    name: z.string().max(200),
-    direction: z.string().max(20),
-    type: z.string().max(20),
-    at: z.string(),
-  })
-  .passthrough();
-
-const communitySchema = z
-  .object({
-    id: z.string().min(1).max(120),
-    name: z.string().max(200),
-    groups: z.array(z.unknown()).max(200),
-  })
-  .passthrough();
-
-export const appStateSchema = z.object({
-  version: z.number().int(),
-  theme: z.enum(['light', 'dark']),
-  chats: z.array(chatSchema).max(500),
-  messages: z.record(z.string().max(120), z.array(messageSchema).max(5000)),
-  statuses: z.array(statusGroupSchema).max(200),
-  calls: z.array(callSchema).max(500),
-  communities: z.array(communitySchema).max(200),
-  user: z
-    .object({
-      name: z.string().max(120),
-      about: z.string().max(500),
-      phone: z.string().max(40),
-      avatar: z.string().max(2000),
-    })
-    .passthrough(),
-});
-
-export const statePayloadSchema = z.object({
-  state: appStateSchema,
-});
-
 export const broadcastSchema = z.object({
   title: z.string().trim().min(1, 'Add a title.').max(140),
   message: z.string().trim().min(1, 'Add a message.').max(2000),
@@ -101,4 +31,103 @@ export const signUpSchema = z.object({
   phone: z.string().trim().min(6).max(20),
   countryCode: z.string().trim().max(8),
   countryName: z.string().trim().max(120),
+});
+
+export const createChatSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('direct'),
+    userId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal('group'),
+    name: z.string().trim().min(1, 'Give the group a name.').max(120),
+    memberIds: z.array(z.string().min(1)).min(1, 'Add at least one member.').max(200),
+    avatar: z.string().max(2000).optional(),
+  }),
+]);
+
+export const chatUpdateSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('read'), id: z.string().min(1) }),
+  z.object({
+    action: z.literal('flag'),
+    id: z.string().min(1),
+    flag: z.enum(['pinned', 'muted', 'archived', 'favorite']),
+    value: z.boolean().optional(),
+  }),
+  z.object({
+    action: z.literal('rename'),
+    id: z.string().min(1),
+    name: z.string().trim().min(1).max(120),
+    avatar: z.string().max(2000).optional(),
+  }),
+]);
+
+export const sendMessageSchema = z
+  .object({
+    chatId: z.string().min(1),
+    text: z.string().max(8000).optional().default(''),
+    kind: z.enum(['text', 'image', 'voice', 'document', 'location']).optional().default('text'),
+    image: z.string().max(4000).optional(),
+    duration: z.string().max(20).optional(),
+    fileName: z.string().max(200).optional(),
+    fileSize: z.string().max(40).optional(),
+    replyToId: z.string().max(120).optional(),
+  })
+  .refine(
+    (value) => value.text.trim().length > 0 || Boolean(value.image) || Boolean(value.fileName),
+    { message: 'Write a message first.' },
+  );
+
+export const messageDeleteSchema = z.union([
+  z.object({ id: z.string().min(1) }),
+  z.object({ chatId: z.string().min(1), all: z.literal(true) }),
+]);
+
+export const reactionSchema = z.object({
+  id: z.string().min(1),
+  emoji: z.string().min(1).max(16),
+});
+
+export const statusCreateSchema = z.object({
+  caption: z.string().max(700).default(''),
+  background: z.string().max(40).default('#1a6b5c'),
+  image: z.string().max(4000).optional(),
+});
+
+export const statusActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('view'), groupId: z.string().min(1).max(120) }),
+  z.object({ action: z.literal('delete'), groupId: z.string().min(1).max(120) }),
+]);
+
+export const communityCreateSchema = z.object({
+  name: z.string().trim().min(2, 'Give the community a name.').max(120),
+  description: z.string().trim().max(500).default(''),
+});
+
+export const communityUpdateSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('announcement'),
+    id: z.string().min(1),
+    announcement: z.string().trim().max(2000),
+  }),
+  z.object({
+    action: z.literal('rename'),
+    id: z.string().min(1),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(500).optional(),
+  }),
+]);
+
+export const callCreateSchema = z.object({
+  peerId: z.string().min(1).optional(),
+  name: z.string().trim().min(1).max(200),
+  avatar: z.string().max(2000).optional(),
+  direction: z.enum(['incoming', 'outgoing', 'missed']),
+  type: z.enum(['voice', 'video']),
+  duration: z.string().max(20).optional(),
+});
+
+export const pushTokenSchema = z.object({
+  token: z.string().min(8).max(400),
+  platform: z.enum(['android', 'ios', 'web']).default('android'),
 });

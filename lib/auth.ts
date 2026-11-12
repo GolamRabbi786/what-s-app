@@ -5,7 +5,6 @@ import { admin, username } from 'better-auth/plugins';
 import { db } from './db';
 import * as authSchema from './auth-schema';
 import * as schema from './schema';
-import { seedUserState } from './seed';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -99,19 +98,6 @@ export const auth = betterAuth({
             partitioned: true,
           },
         }),
-  },
-  databaseHooks: {
-    user: {
-      create: {
-        after: async (createdUser) => {
-          try {
-            await seedUserState(createdUser.id);
-          } catch {
-            // The data layer seeds on first load if this hook cannot run.
-          }
-        },
-      },
-    },
   },
 });
 

@@ -4,6 +4,7 @@ import { MessageCircle } from 'lucide-react-native';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { FadeIn, Pulse } from '@/components/Motion';
 import { AppProvider, useApp } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -12,13 +13,19 @@ function Splash() {
   const { theme } = useApp();
   return (
     <View style={[styles.splash, { backgroundColor: theme.mode === 'dark' ? '#0b141a' : '#f7f8fa' }]}>
-      <View style={styles.splashLogo}>
-        <MessageCircle color="#ffffff" size={34} strokeWidth={2.4} />
-      </View>
-      <Text style={[styles.splashTitle, { color: theme.text }]}>WhatsApp</Text>
-      <Text style={[styles.splashSub, { color: theme.textSecondary }]}>
-        Simple, reliable, private messaging
-      </Text>
+      <Pulse min={0.94} max={1.04} duration={1900}>
+        <View style={styles.splashLogo}>
+          <MessageCircle color="#ffffff" size={34} strokeWidth={2.4} />
+        </View>
+      </Pulse>
+      <FadeIn delay={120}>
+        <Text style={[styles.splashTitle, { color: theme.text }]}>WhatsApp</Text>
+      </FadeIn>
+      <FadeIn delay={220}>
+        <Text style={[styles.splashSub, { color: theme.textSecondary }]}>
+          Simple, reliable, private messaging
+        </Text>
+      </FadeIn>
       <ActivityIndicator color={theme.accent} style={styles.splashSpinner} />
     </View>
   );

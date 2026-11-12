@@ -46,6 +46,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '../components/Avatar';
+import { FadeSlideIn } from '../components/Motion';
 import { Sheet } from '../components/Sheet';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -1554,6 +1555,7 @@ function StatCard({
   theme: ReturnType<typeof useApp>['theme'];
 }) {
   return (
+    <FadeSlideIn offset={12} duration={380}>
     <View style={[styles.statCard, { backgroundColor: theme.panel, borderColor: theme.border }]}>
       <View style={styles.statTop}>
         <View style={[styles.statIcon, { backgroundColor: `${tint}1f` }]}>
@@ -1564,6 +1566,7 @@ function StatCard({
       <Text style={[styles.statValue, { color: theme.text }]}>{value}</Text>
       <Text style={[styles.statDetail, { color: theme.textMuted }]}>{detail}</Text>
     </View>
+    </FadeSlideIn>
   );
 }
 

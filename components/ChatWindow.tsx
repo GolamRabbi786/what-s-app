@@ -46,6 +46,7 @@ import { useApp } from '../context/AppContext';
 import { formatClock, formatDateLabel } from '../lib/format';
 import { CallParticipant, Chat, Message, ReplyTo } from '../lib/types';
 import { Avatar } from './Avatar';
+import { FadeSlideIn } from './Motion';
 import { CallOverlay } from './CallOverlay';
 import { Sheet } from './Sheet';
 
@@ -242,6 +243,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     const reply = message.replyTo;
 
     return (
+      <FadeSlideIn offset={9} duration={260}>
       <View
         style={[
           styles.messageRow,
@@ -432,6 +434,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           ) : null}
         </Pressable>
       </View>
+      </FadeSlideIn>
     );
   };
 
