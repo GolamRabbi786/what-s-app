@@ -12,6 +12,7 @@ import {
   unauthorized,
 } from '../../lib/api';
 import { statePayloadSchema } from '../../lib/validation';
+import type { AppState } from '../../lib/types';
 
 const MAX_STATE_BYTES = 3_000_000;
 
@@ -78,13 +79,14 @@ export async function PUT(request: Request) {
     }
 
     const updatedAt = new Date();
+    const nextState = parsed.data.state as unknown as AppState;
 
     await db
       .insert(appStates)
-      .values({ userId: context.profile.id, data: parsed.data.state, updatedAt })
+      .values({ userId: context.profile.id, data: nextState, updatedAt })
       .onConflictDoUpdate({
         target: appStates.userId,
-        set: { data: parsed.data.state, updatedAt },
+        set: { data: nextState, updatedAt },
       });
 
     await db

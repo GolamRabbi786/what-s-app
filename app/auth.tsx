@@ -435,7 +435,7 @@ export default function AuthScreen() {
       <View style={[styles.securityNote, { backgroundColor: theme.chip }]}>
         <ShieldCheck color={theme.accent} size={16} />
         <Text style={[styles.securityText, { color: theme.textSecondary }]}>
-          {countriesLabel} countries supported · encrypted local session · admin-managed accounts
+          {countriesLabel} countries supported · synced across your devices · admin-managed accounts
         </Text>
       </View>
 

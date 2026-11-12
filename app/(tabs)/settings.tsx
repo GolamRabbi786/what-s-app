@@ -350,7 +350,7 @@ function SettingsHome() {
                   onPress={() =>
                     Alert.alert(
                       'About this build',
-                      'A WhatsApp-inspired web experience built with Expo and React Native. All conversations are stored locally in your browser.',
+                      'A WhatsApp-inspired web experience built with Expo and React Native. All conversations are securely synced to your account.',
                     )
                   }
                   last

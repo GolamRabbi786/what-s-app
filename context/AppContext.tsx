@@ -12,6 +12,7 @@ import { apiRequest } from '../lib/client';
 import { seedState } from '../lib/data';
 import { Palette, palettes } from '../lib/theme';
 import {
+  Account,
   AppState,
   AppUser,
   CallLog,
@@ -125,6 +126,22 @@ const AUTO_REPLIES: Record<
   ],
 };
 
+function withProfile(state: AppState, user: Account | null): AppState {
+  if (!user) return state;
+  const fullPhone = `${user.countryCode} ${user.phone}`.trim();
+
+  return {
+    ...state,
+    user: {
+      ...state.user,
+      name: user.name || state.user.name,
+      phone: fullPhone || state.user.phone,
+      about: user.about || state.user.about,
+      avatar: user.avatar ?? state.user.avatar,
+    },
+  };
+}
+
 function mergeStoredState(stored: AppState): AppState {
   if (!stored || stored.version !== seedState.version) return seedState;
   return {
@@ -149,8 +166,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastServerUpdate = useRef<string | null>(null);
   const pendingSave = useRef(false);
-  const skipPersistUntil = useRef(0);
+  const lastRemoteSnapshot = useRef<string | null>(null);
   const currentUserId = currentUser?.id ?? null;
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
 
   useEffect(() => {
     activeChatRef.current = activeChatId;
@@ -174,9 +193,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     apiRequest<{ state: AppState; updatedAt: string }>('/api/state')
       .then((result) => {
         if (cancelled) return;
-        skipPersistUntil.current = Date.now() + 1500;
         lastServerUpdate.current = result.updatedAt;
-        setState(mergeStoredState(result.state));
+        const remote = mergeStoredState(result.state);
+        lastRemoteSnapshot.current = JSON.stringify(remote);
+        setState(withProfile(remote, currentUserRef.current));
         setHydrated(true);
       })
       .catch((error) => {
@@ -198,12 +218,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hydrated || !currentUserId) return;
-    if (Date.now() < skipPersistUntil.current) {
-      skipPersistUntil.current = 0;
+    const snapshot = state;
+    const serialized = JSON.stringify(snapshot);
+
+    if (serialized === lastRemoteSnapshot.current) {
+      lastRemoteSnapshot.current = null;
       return;
     }
-
-    const snapshot = state;
+    lastRemoteSnapshot.current = null;
     const timeout = setTimeout(() => {
       pendingSave.current = true;
       apiRequest<{ updatedAt: string }>('/api/state', {
@@ -242,9 +264,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const result = await apiRequest<{ state: AppState; updatedAt: string }>('/api/state');
         if (cancelled || pendingSave.current) return;
         if (result.updatedAt !== lastServerUpdate.current) {
-          skipPersistUntil.current = Date.now() + 1500;
           lastServerUpdate.current = result.updatedAt;
-          setState(mergeStoredState(result.state));
+          const remote = mergeStoredState(result.state);
+          lastRemoteSnapshot.current = JSON.stringify(remote);
+          setState(withProfile(remote, currentUserRef.current));
         }
       } catch {
         // A later poll will retry; avoid noisy banners for transient failures.
@@ -302,6 +325,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     currentUser?.about,
     currentUser?.avatar,
     currentUser?.countryCode,
+    hydrated,
   ]);
 
   useEffect(() => {

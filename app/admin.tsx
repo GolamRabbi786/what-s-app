@@ -220,8 +220,8 @@ export default function AdminScreen() {
 
   const notify = (tone: 'ok' | 'error', text: string) => setToast({ tone, text });
 
-  const submitBroadcast = () => {
-    const result = sendBroadcast({
+  const submitBroadcast = async () => {
+    const result = await sendBroadcast({
       title: broadcastTitle,
       message: broadcastMessage,
       audience,
@@ -235,12 +235,12 @@ export default function AdminScreen() {
     notify('ok', 'Broadcast queued and delivered to the selected audience.');
   };
 
-  const submitPassword = () => {
+  const submitPassword = async () => {
     if (nextPassword !== confirmPassword) {
       notify('error', 'New passwords do not match.');
       return;
     }
-    const result = changeAdminPassword(currentPassword, nextPassword);
+    const result = await changeAdminPassword(currentPassword, nextPassword);
     if (!result.ok) {
       notify('error', result.error ?? 'Unable to update password.');
       return;
@@ -591,8 +591,8 @@ export default function AdminScreen() {
                       `${account.name} ${account.status === 'active' ? 'suspended' : 'reactivated'}.`,
                     );
                   }}
-                  onReset={() => {
-                    const result = adminResetPassword(account.id);
+                  onReset={async () => {
+                    const result = await adminResetPassword(account.id);
                     if (!result.ok) {
                       notify('error', result.error ?? 'Unable to reset password.');
                     } else {
@@ -606,8 +606,8 @@ export default function AdminScreen() {
                     setConfirm({
                       title: 'Delete account',
                       message: `Permanently remove ${account.name} (@${account.username})? This cannot be undone.`,
-                      action: () => {
-                        const result = adminDeleteUser(account.id);
+                      action: async () => {
+                        const result = await adminDeleteUser(account.id);
                         setConfirm(null);
                         notify(
                           result.ok ? 'ok' : 'error',

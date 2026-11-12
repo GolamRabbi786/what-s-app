@@ -459,7 +459,7 @@ function CallsHome() {
           <View style={[styles.menuNote, { backgroundColor: theme.chip }]}>
             <Clock color={theme.textMuted} size={15} />
             <Text style={[styles.menuNoteText, { color: theme.textSecondary }]}>
-              Call logs are stored on this device. Clearing them won’t delete calls on linked devices.
+              Call logs are synced to your account. Clearing them removes them from every linked device.
             </Text>
           </View>
         </View>

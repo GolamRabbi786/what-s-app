@@ -86,20 +86,29 @@ export const auth = betterAuth({
       adminRoles: ['admin'],
     }),
   ],
-  advanced: isProduction
-    ? {}
-    : {
-        defaultCookieAttributes: {
-          sameSite: 'none',
-          secure: true,
-          partitioned: true,
-        },
-      },
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: ['x-forwarded-for', 'x-real-ip', 'cf-connecting-ip'],
+    },
+    ...(isProduction
+      ? {}
+      : {
+          defaultCookieAttributes: {
+            sameSite: 'none',
+            secure: true,
+            partitioned: true,
+          },
+        }),
+  },
   databaseHooks: {
     user: {
       create: {
         after: async (createdUser) => {
-          await seedUserState(createdUser.id);
+          try {
+            await seedUserState(createdUser.id);
+          } catch {
+            // The data layer seeds on first load if this hook cannot run.
+          }
         },
       },
     },

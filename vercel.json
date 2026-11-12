@@ -1,5 +1,15 @@
 {
   "buildCommand": "bun run build:web",
-  "outputDirectory": "dist",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "outputDirectory": "dist/client",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "dist/server/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
 }
