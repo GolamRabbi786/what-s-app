@@ -1,9 +1,12 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, ChevronRight, Pause, Play, Send, X } from 'lucide-react-native';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   Image,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -30,6 +33,18 @@ export function StatusViewer({ visible, statusId, onClose }: StatusViewerProps) 
   const [progress, setProgress] = useState(0);
   const [paused, setPaused] = useState(false);
   const [reply, setReply] = useState('');
+  const fade = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    fade.setValue(0);
+    Animated.timing(fade, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [visible, groupIndex, itemIndex, fade]);
 
   const group = groups[groupIndex];
   const item = group?.items[itemIndex];
@@ -202,7 +217,23 @@ export function StatusViewer({ visible, statusId, onClose }: StatusViewerProps) 
             accessibilityLabel="Next status"
           />
 
-          <View pointerEvents="none" style={styles.stage}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.stage,
+              {
+                opacity: fade,
+                transform: [
+                  {
+                    scale: fade.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             {item.type === 'text' ? (
               <Text style={styles.textStatus}>{item.caption}</Text>
             ) : item.caption ? (
@@ -210,7 +241,7 @@ export function StatusViewer({ visible, statusId, onClose }: StatusViewerProps) 
                 <Text style={styles.caption}>{item.caption}</Text>
               </View>
             ) : null}
-          </View>
+          </Animated.View>
 
           {wide ? (
             <>

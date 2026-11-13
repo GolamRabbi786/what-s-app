@@ -8,8 +8,33 @@
     "scheme": "whatsapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.whatsapp.webclone",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "WhatsApp uses your microphone for voice messages and calls.",
+        "NSCameraUsageDescription": "WhatsApp uses your camera for video calls and profile photos."
+      }
+    },
+    "android": {
+      "package": "com.whatsapp.webclone",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#00a884"
+      },
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "WAKE_LOCK",
+        "MODIFY_AUDIO_SETTINGS",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -25,7 +50,42 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "expo-audio"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow WhatsApp to use your microphone for voice messages and calls."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow WhatsApp to access your photos to share them in chats.",
+          "cameraPermission": "Allow WhatsApp to use your camera for photos and video calls.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow WhatsApp to use your location to share it in chats."
+        }
+      ],
+      "expo-document-picker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#00a884",
+          "defaultChannel": "messages",
+          "androidMode": "default",
+          "sounds": [
+            "./assets/sounds/notification.wav",
+            "./assets/sounds/message.wav",
+            "./assets/sounds/ringtone.wav",
+            "./assets/sounds/call-end.wav"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -67,7 +67,7 @@ export const messages = pgTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     text: text('text').notNull().default(''),
     kind: text('kind')
-      .$type<'text' | 'image' | 'voice' | 'document' | 'location'>()
+      .$type<'text' | 'image' | 'voice' | 'document' | 'location' | 'call'>()
       .notNull()
       .default('text'),
     image: text('image'),
@@ -228,3 +228,50 @@ export type CommunityRow = typeof communities.$inferSelect;
 export type CallLogRow = typeof callLogs.$inferSelect;
 export type BroadcastRow = typeof broadcasts.$inferSelect;
 export type BroadcastInsert = typeof broadcasts.$inferInsert;
+
+export const callSessions = pgTable(
+  'call_sessions',
+  {
+    id: text('id').primaryKey(),
+    chatId: text('chat_id').references(() => chats.id, { onDelete: 'cascade' }),
+    callerId: text('caller_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    calleeId: text('callee_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    callerName: text('caller_name').notNull(),
+    callerAvatar: text('caller_avatar'),
+    type: text('type').$type<'voice' | 'video'>().notNull(),
+    status: text('status')
+      .$type<'calling' | 'ringing' | 'connected' | 'ended' | 'declined' | 'missed'>()
+      .notNull()
+      .default('calling'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    connectedAt: timestamp('connected_at', { withTimezone: true }),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    durationSeconds: integer('duration_seconds'),
+  },
+  (table) => [
+    index('call_sessions_callee_status_idx').on(table.calleeId, table.status),
+    index('call_sessions_caller_status_idx').on(table.callerId, table.status),
+  ],
+);
+
+export const typingStates = pgTable(
+  'typing_states',
+  {
+    chatId: text('chat_id')
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    mode: text('mode').$type<'typing' | 'recording'>().notNull().default('typing'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.userId] }),
+    index('typing_states_updated_idx').on(table.updatedAt),
+  ],
+);

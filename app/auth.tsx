@@ -17,9 +17,11 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react-native';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -31,15 +33,20 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AnimatedBackground } from '../components/AnimatedBackground';
 import { CountryPicker } from '../components/CountryPicker';
-import { FadeIn, FadeSlideIn, Pulse } from '../components/Motion';
+import { AnimatedPressable, FadeIn, FadeSlideIn, Pulse } from '../components/Motion';
 import { Sheet } from '../components/Sheet';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { BACKGROUND_PRESETS } from '../lib/backgrounds';
 import { COUNTRIES, DEFAULT_COUNTRY } from '../lib/countries';
 import { Country } from '../lib/types';
 
 type Mode = 'login' | 'signup';
+
+const AUTH_BACKGROUND =
+  BACKGROUND_PRESETS.find((preset) => preset.id === 'aurora') ?? BACKGROUND_PRESETS[0];
 
 interface FieldProps {
   label: string;
@@ -67,18 +74,58 @@ function Field({
   theme,
 }: FieldProps) {
   const [focused, setFocused] = useState(false);
+  const focus = useRef(new Animated.Value(0)).current;
+
+  const animateFocus = (next: boolean) => {
+    setFocused(next);
+    Animated.timing(focus, {
+      toValue: next ? 1 : 0,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  };
+
   return (
     <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>{label}</Text>
-      <View
+      <Animated.Text
+        style={[styles.fieldLabel, { color: focused ? theme.accent : theme.textSecondary }]}
+      >
+        {label}
+      </Animated.Text>
+      <Animated.View
         style={[
           styles.inputWrap,
           {
             backgroundColor: theme.panelAlt,
-            borderColor: focused ? theme.accent : theme.border,
+            borderColor: focus.interpolate({
+              inputRange: [0, 1],
+              outputRange: [theme.border, theme.accent],
+            }),
+            transform: [
+              {
+                scale: focus.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, 1.012],
+                }),
+              },
+            ],
           },
         ]}
       >
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.inputGlow,
+            {
+              borderColor: theme.accent,
+              opacity: focus.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 0.28],
+              }),
+            },
+          ]}
+        />
         <Icon color={focused ? theme.accent : theme.textMuted} size={17} />
         <TextInput
           value={value}
@@ -89,12 +136,12 @@ function Field({
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
           autoCorrect={false}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={() => animateFocus(true)}
+          onBlur={() => animateFocus(false)}
           style={[styles.input, { color: theme.text }]}
         />
         {right}
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -124,6 +171,18 @@ export default function AuthScreen() {
   const [busy, setBusy] = useState(false);
 
   const [forgotOpen, setForgotOpen] = useState(false);
+
+  const [segmentWidth, setSegmentWidth] = useState(0);
+  const slide = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.spring(slide, {
+      toValue: mode === 'login' ? 0 : 1,
+      speed: 16,
+      bounciness: 7,
+      useNativeDriver: false,
+    }).start();
+  }, [mode, slide]);
 
   const countriesLabel = useMemo(() => COUNTRIES.length, []);
 
@@ -197,7 +256,31 @@ export default function AuthScreen() {
   const form = (
     <FadeSlideIn delay={90} offset={20}>
     <View style={[styles.formCard, { backgroundColor: theme.panel, borderColor: theme.border }]}>
-      <View style={[styles.segment, { backgroundColor: theme.chip }]}>
+      <View
+        style={[styles.segment, { backgroundColor: theme.chip }]}
+        onLayout={(event) => setSegmentWidth(event.nativeEvent.layout.width)}
+      >
+        {segmentWidth > 0 ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.segmentIndicator,
+              {
+                width: (segmentWidth - 8) / 2,
+                backgroundColor: theme.panel,
+                shadowColor: theme.shadow,
+                transform: [
+                  {
+                    translateX: slide.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, (segmentWidth - 8) / 2],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
+        ) : null}
         {(['login', 'signup'] as Mode[]).map((item) => {
           const active = mode === item;
           return (
@@ -206,7 +289,6 @@ export default function AuthScreen() {
               onPress={() => switchMode(item)}
               style={({ pressed }) => [
                 styles.segmentItem,
-                active && { backgroundColor: theme.panel },
                 pressed && { opacity: 0.75 },
               ]}
             >
@@ -241,9 +323,16 @@ export default function AuthScreen() {
       </View>
 
       {error ? (
-        <View style={[styles.alert, { backgroundColor: theme.mode === 'dark' ? '#3a1a1c' : '#fdeceb' }]}>
-          <Text style={[styles.alertText, { color: theme.danger }]}>{error}</Text>
-        </View>
+        <FadeSlideIn key={error} offset={-8} duration={260}>
+          <View
+            style={[
+              styles.alert,
+              { backgroundColor: theme.mode === 'dark' ? '#3a1a1c' : '#fdeceb' },
+            ]}
+          >
+            <Text style={[styles.alertText, { color: theme.danger }]}>{error}</Text>
+          </View>
+        </FadeSlideIn>
       ) : null}
 
       {mode === 'login' ? (
@@ -424,15 +513,12 @@ export default function AuthScreen() {
         </>
       )}
 
-      <Pressable
+      <AnimatedPressable
         onPress={submit}
         disabled={busy}
-        style={({ pressed }) => [
-          styles.submit,
-          { backgroundColor: theme.accent },
-          (pressed || busy) && { opacity: 0.82 },
-        ]}
-        accessibilityRole="button"
+        scaleTo={0.985}
+        accessibilityLabel={mode === 'login' ? 'Sign in' : 'Create account'}
+        style={[styles.submit, { backgroundColor: theme.accent }, busy && { opacity: 0.82 }]}
       >
         {busy ? (
           <ActivityIndicator color="#ffffff" size="small" />
@@ -444,7 +530,7 @@ export default function AuthScreen() {
         <Text style={styles.submitText}>
           {mode === 'login' ? 'Sign in' : 'Create account'}
         </Text>
-      </Pressable>
+      </AnimatedPressable>
 
       <View style={[styles.securityNote, { backgroundColor: theme.chip }]}>
         <ShieldCheck color={theme.accent} size={16} />
@@ -469,7 +555,7 @@ export default function AuthScreen() {
         <View style={[styles.adminDividerLine, { backgroundColor: theme.border }]} />
       </View>
 
-      <Pressable
+      <AnimatedPressable
         onPress={() => {
           setAdminMode((value) => !value);
           setMode('login');
@@ -477,20 +563,19 @@ export default function AuthScreen() {
           setPassword('');
           setError('');
         }}
-        style={({ pressed }) => [
+        scaleTo={0.985}
+        accessibilityLabel="Administrator sign in"
+        style={[
           styles.adminLink,
           { borderColor: adminMode ? theme.accent : theme.border },
           adminMode && { backgroundColor: theme.chip },
-          pressed && { opacity: 0.78 },
         ]}
-        accessibilityRole="button"
-        accessibilityLabel="Administrator sign in"
       >
         <ShieldCheck color={theme.accent} size={16} />
         <Text style={[styles.adminLinkText, { color: theme.text }]}>
           {adminMode ? 'Back to user sign in' : 'Administrator sign in'}
         </Text>
-      </Pressable>
+      </AnimatedPressable>
       {adminMode ? (
         <Text style={[styles.adminHint, { color: theme.textMuted }]}>
           Restricted area · only platform administrators can open the Admin Center.
@@ -513,12 +598,8 @@ export default function AuthScreen() {
         >
           {desktop ? (
             <View style={styles.desktopRow}>
-              <LinearGradient
-                colors={theme.mode === 'dark' ? ['#0b3b33', '#111b21'] : ['#075e54', '#00a884']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.hero, { minHeight: height - 72 }]}
-              >
+              <View style={[styles.hero, { minHeight: height - 72 }]}>
+                <AnimatedBackground background={AUTH_BACKGROUND} dim={0.08} />
                 <Pulse style={styles.heroGlowOne} min={0.9} max={1.08} duration={7000}>
                   <View style={{ flex: 1 }} />
                 </Pulse>
@@ -582,7 +663,7 @@ export default function AuthScreen() {
                     Millions of conversations happening right now.
                   </Text>
                 </View>
-              </LinearGradient>
+              </View>
 
               <View style={styles.formPanel}>
                 <View style={styles.formPanelInner}>{form}</View>
@@ -591,17 +672,29 @@ export default function AuthScreen() {
           ) : (
             <View style={styles.mobileWrap}>
               <FadeIn>
-              <View style={styles.mobileBrand}>
+              <LinearGradient
+                colors={['#053d36', '#075e54', '#00a884']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.mobileBanner}
+              >
+                <AnimatedBackground background={AUTH_BACKGROUND} dim={0.06} />
                 <Pulse min={0.96} max={1.05} duration={2600}>
-                  <View style={[styles.brandMark, { backgroundColor: theme.accent }]}>
-                    <MessageCircle color="#ffffff" size={22} strokeWidth={2.4} />
+                  <View style={styles.mobileBrandMark}>
+                    <MessageCircle color="#ffffff" size={26} strokeWidth={2.4} />
                   </View>
                 </Pulse>
-                <Text style={[styles.mobileBrandName, { color: theme.text }]}>WhatsApp</Text>
-                <Text style={[styles.mobileBrandSub, { color: theme.textSecondary }]}>
+                <Text style={styles.mobileBrandName}>WhatsApp</Text>
+                <Text style={styles.mobileBrandSub}>
                   Simple, reliable, private messaging
                 </Text>
-              </View>
+                <View style={styles.mobileBannerPill}>
+                  <Sparkles color="#d9fdd3" size={12} />
+                  <Text style={styles.mobileBannerPillText}>
+                    {countriesLabel} countries · end-to-end encrypted
+                  </Text>
+                </View>
+              </LinearGradient>
               </FadeIn>
               {form}
               <Text style={[styles.footerNote, { color: theme.textMuted }]}>

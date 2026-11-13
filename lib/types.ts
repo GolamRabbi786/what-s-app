@@ -2,7 +2,7 @@ export type ThemeMode = 'light' | 'dark';
 
 export type ChatFilter = 'all' | 'unread' | 'favorites' | 'groups';
 
-export type MessageKind = 'text' | 'image' | 'voice' | 'document' | 'location';
+export type MessageKind = 'text' | 'image' | 'voice' | 'document' | 'location' | 'call';
 
 export type MessageStatus = 'sent' | 'delivered' | 'read';
 
@@ -77,6 +77,7 @@ export interface StatusGroup {
   time: string;
   viewed: boolean;
   items: StatusItem[];
+  viewers?: { name: string; avatar?: string }[];
 }
 
 export interface CallLog {
@@ -118,6 +119,7 @@ export interface AppState {
   calls: CallLog[];
   communities: Community[];
   contacts: Contact[];
+  typing: TypingPeer[];
   user: AppUser;
 }
 
@@ -164,4 +166,105 @@ export interface CallParticipant {
   name: string;
   avatar?: string;
   muted?: boolean;
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  active: number;
+  suspended: number;
+  verified: number;
+  admins: number;
+  countries: number;
+  chats: number;
+  groups: number;
+  messages: number;
+  calls: number;
+  statuses: number;
+  communities: number;
+  updatedAt: string;
+}
+
+export interface AdminChatSummary {
+  id: string;
+  name: string;
+  kind: 'direct' | 'group';
+  avatar?: string;
+  members: number;
+  messages: number;
+  createdAt: string;
+}
+
+export interface AdminStatusItem {
+  id: string;
+  type: 'image' | 'text';
+  caption?: string;
+  image?: string;
+  createdAt: string;
+}
+
+export interface AdminStatusGroup {
+  id: string;
+  name: string;
+  avatar?: string;
+  items: AdminStatusItem[];
+}
+
+export interface AdminCommunitySummary {
+  id: string;
+  name: string;
+  avatar?: string;
+  description: string;
+  announcement: string;
+  members: number;
+  groups: number;
+  createdAt: string;
+}
+
+export interface AdminCallSummary {
+  id: string;
+  name: string;
+  direction: 'incoming' | 'outgoing' | 'missed';
+  type: 'voice' | 'video';
+  at: string;
+  duration?: string;
+  owner: string;
+}
+
+export interface AdminContent {
+  chats: AdminChatSummary[];
+  statusGroups: AdminStatusGroup[];
+  communities: AdminCommunitySummary[];
+  calls: AdminCallSummary[];
+}
+
+export interface TypingPeer {
+  userId: string;
+  name: string;
+  mode: 'typing' | 'recording';
+  chatId: string;
+}
+
+export interface CallSession {
+  id: string;
+  chatId: string | null;
+  callerId: string;
+  calleeId: string;
+  callerName: string;
+  callerAvatar?: string;
+  calleeName: string;
+  calleeAvatar?: string;
+  type: 'voice' | 'video';
+  status: 'calling' | 'ringing' | 'connected' | 'ended' | 'declined' | 'missed';
+  createdAt: string;
+  connectedAt?: string;
+  endedAt?: string;
+  durationSeconds?: number;
+}
+
+export interface CallBackground {
+  id: string;
+  label: string;
+  kind: 'animated' | 'image';
+  colors?: [string, string, string];
+  image?: string;
 }

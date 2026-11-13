@@ -11,6 +11,7 @@ import React, {
 } from 'react';
 import { useAuth } from './AuthContext';
 import { apiRequest } from '../lib/client';
+import { backgroundById, DEFAULT_BACKGROUND } from '../lib/backgrounds';
 import { registerPushNotifications, showIncomingNotification } from '../lib/notifications';
 import { playMessageSound } from '../lib/sounds';
 import { palettes, Palette } from '../lib/theme';
@@ -18,7 +19,9 @@ import {
   Account,
   AppState,
   AppUser,
+  CallBackground,
   CallLog,
+  CallSession,
   Chat,
   ChatFilter,
   Community,
@@ -27,6 +30,7 @@ import {
   ReplyTo,
   StatusGroup,
   ThemeMode,
+  TypingPeer,
 } from '../lib/types';
 
 type ChatFlag = 'pinned' | 'muted' | 'archived' | 'favorite';
@@ -43,6 +47,7 @@ interface SendOptions {
 interface TypingState {
   chatId: string;
   label: string;
+  mode: 'typing' | 'recording';
 }
 
 interface AppContextValue {
@@ -81,11 +86,26 @@ interface AppContextValue {
   updateCommunityAnnouncement: (communityId: string, announcement: string) => void;
   syncError: string | null;
   dismissSyncError: () => void;
+  typingForChat: (chatId: string) => TypingPeer | null;
+  setTypingMode: (chatId: string, mode: 'typing' | 'recording' | 'idle') => void;
+  background: CallBackground;
+  setBackground: (background: CallBackground) => void;
+  incomingCall: CallSession | null;
+  activeCall: CallSession | null;
+  startCallSession: (input: {
+    peerId: string;
+    chatId?: string;
+    type: 'voice' | 'video';
+  }) => Promise<CallSession | null>;
+  respondToCall: (action: 'accept' | 'decline', id: string) => Promise<CallSession | null>;
+  endCallSession: (id: string) => Promise<CallSession | null>;
+  refreshCall: (id: string) => Promise<CallSession | null>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 const THEME_KEY = 'whatsapp.theme';
+const BACKGROUND_KEY = 'whatsapp.background';
 const POLL_INTERVAL = 3000;
 
 const EMPTY_STATE: AppState = {
@@ -97,6 +117,7 @@ const EMPTY_STATE: AppState = {
   calls: [],
   communities: [],
   contacts: [],
+  typing: [],
   user: {
     name: '',
     about: 'Hey there! I am using WhatsApp.',
@@ -135,7 +156,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ChatFilter>('all');
   const [query, setQuery] = useState('');
-  const [typing] = useState<TypingState | null>(null);
+  const [background, setBackgroundState] = useState<CallBackground>(DEFAULT_BACKGROUND);
+  const [incomingCall, setIncomingCall] = useState<CallSession | null>(null);
+  const [activeCall, setActiveCall] = useState<CallSession | null>(null);
+  const activeCallRef = useRef<CallSession | null>(null);
+  activeCallRef.current = activeCall;
+  const typingSentRef = useRef<{ chatId: string; mode: string; at: number } | null>(null);
   const themeRef = useRef<ThemeMode>('light');
   const revisionRef = useRef<string | null>(null);
   const activeChatRef = useRef<string | null>(null);
@@ -170,6 +196,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(BACKGROUND_KEY)
+      .then((stored) => {
+        if (!active || !stored) return;
+        try {
+          const parsed = JSON.parse(stored) as CallBackground;
+          if (parsed && (parsed.kind === 'animated' || parsed.kind === 'image')) {
+            setBackgroundState(
+              parsed.colors || parsed.image ? parsed : backgroundById(parsed.id),
+            );
+          }
+        } catch {
+          // ignore malformed background payloads
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const setBackground = useCallback((next: CallBackground) => {
+    setBackgroundState(next);
+    void AsyncStorage.setItem(BACKGROUND_KEY, JSON.stringify(next)).catch(() => undefined);
   }, []);
 
   const handleError = useCallback(
@@ -726,6 +779,180 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const dismissSyncError = useCallback(() => setSyncError(null), []);
 
+  const typingForChat = useCallback(
+    (chatId: string) => state.typing.find((peer) => peer.chatId === chatId) ?? null,
+    [state.typing],
+  );
+
+  const typing = useMemo<TypingState | null>(() => {
+    const peer =
+      state.typing.find((entry) => entry.chatId === activeChatId) ?? null;
+    if (!peer) return null;
+    return { chatId: peer.chatId, label: peer.name, mode: peer.mode };
+  }, [state.typing, activeChatId]);
+
+  const setTypingMode = useCallback(
+    (chatId: string, mode: 'typing' | 'recording' | 'idle') => {
+      const now = Date.now();
+      const last = typingSentRef.current;
+      if (
+        mode !== 'idle' &&
+        last &&
+        last.chatId === chatId &&
+        last.mode === mode &&
+        now - last.at < 2200
+      ) {
+        return;
+      }
+      typingSentRef.current = { chatId, mode, at: now };
+      void apiRequest('/api/typing', {
+        method: 'POST',
+        body: JSON.stringify({ chatId, mode }),
+      }).catch(() => undefined);
+    },
+    [],
+  );
+
+  const startCallSession = useCallback(
+    async (input: { peerId: string; chatId?: string; type: 'voice' | 'video' }) => {
+      try {
+        const result = await apiRequest<{ session: CallSession | null }>(
+          '/api/call-sessions',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'start',
+              peerId: input.peerId,
+              chatId: input.chatId,
+              type: input.type,
+            }),
+          },
+        );
+        if (result.session) {
+          setActiveCall(result.session);
+          setIncomingCall(null);
+        }
+        return result.session;
+      } catch (error) {
+        handleError(error, 'Unable to start the call.');
+        return null;
+      }
+    },
+    [handleError],
+  );
+
+  const respondToCall = useCallback(
+    async (action: 'accept' | 'decline', id: string) => {
+      try {
+        const result = await apiRequest<{ session: CallSession | null }>(
+          '/api/call-sessions',
+          {
+            method: 'POST',
+            body: JSON.stringify({ action, id }),
+          },
+        );
+        setIncomingCall(null);
+        if (action === 'accept' && result.session) {
+          setActiveCall(result.session);
+        }
+        return result.session;
+      } catch (error) {
+        handleError(error, 'Unable to answer the call.');
+        return null;
+      }
+    },
+    [handleError],
+  );
+
+  const endCallSession = useCallback(
+    async (id: string) => {
+      try {
+        const result = await apiRequest<{ session: CallSession | null }>(
+          '/api/call-sessions',
+          {
+            method: 'POST',
+            body: JSON.stringify({ action: 'end', id }),
+          },
+        );
+        setActiveCall(null);
+        setIncomingCall(null);
+        void fetchState(true);
+        return result.session;
+      } catch (error) {
+        handleError(error, 'Unable to end the call.');
+        setActiveCall(null);
+        return null;
+      }
+    },
+    [fetchState, handleError],
+  );
+
+  const refreshCall = useCallback(async (id: string) => {
+    try {
+      const result = await apiRequest<{ session: CallSession | null }>(
+        `/api/call-sessions?id=${encodeURIComponent(id)}`,
+      );
+      const session = result.session;
+      if (!session) return null;
+      if (session.status === 'ended' || session.status === 'declined' || session.status === 'missed') {
+        setActiveCall(null);
+      } else {
+        setActiveCall(session);
+      }
+      return session;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || !currentUserId) {
+      setIncomingCall(null);
+      setActiveCall(null);
+      return;
+    }
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const current = activeCallRef.current;
+        if (current) {
+          const result = await apiRequest<{ session: CallSession | null }>(
+            `/api/call-sessions?id=${encodeURIComponent(current.id)}`,
+          );
+          if (cancelled || !mountedRef.current) return;
+          const session = result.session;
+          if (!session) return;
+          if (
+            session.status === 'ended' ||
+            session.status === 'declined' ||
+            session.status === 'missed'
+          ) {
+            setActiveCall(null);
+          } else {
+            setActiveCall(session);
+          }
+          return;
+        }
+
+        const result = await apiRequest<{ session: CallSession | null }>(
+          '/api/call-sessions',
+        );
+        if (cancelled || !mountedRef.current) return;
+        setIncomingCall(result.session);
+      } catch {
+        // presence polling is best-effort
+      }
+    };
+
+    void check();
+    const timer = setInterval(check, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [hydrated, currentUserId]);
+
   const theme = palettes[state.theme];
 
   const value = useMemo<AppContextValue>(
@@ -764,6 +991,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateCommunityAnnouncement,
       syncError,
       dismissSyncError,
+      typingForChat,
+      setTypingMode,
+      background,
+      setBackground,
+      incomingCall,
+      activeCall,
+      startCallSession,
+      respondToCall,
+      endCallSession,
+      refreshCall,
       theme,
     }),
     [
@@ -799,6 +1036,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateCommunityAnnouncement,
       syncError,
       dismissSyncError,
+      typingForChat,
+      setTypingMode,
+      background,
+      setBackground,
+      incomingCall,
+      activeCall,
+      startCallSession,
+      respondToCall,
+      endCallSession,
+      refreshCall,
       theme,
     ],
   );

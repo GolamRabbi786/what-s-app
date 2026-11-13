@@ -38,6 +38,8 @@ import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Alert,
+  ImageBackground,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -49,9 +51,11 @@ import {
 } from 'react-native';
 import { AppShell } from '../../components/AppShell';
 import { Avatar } from '../../components/Avatar';
+import { FadeSlideIn } from '../../components/Motion';
 import { Sheet } from '../../components/Sheet';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { BACKGROUND_PRESETS } from '../../lib/backgrounds';
 import { AVATARS } from '../../lib/data';
 
 export default function SettingsScreen() {
@@ -114,7 +118,7 @@ const FAQS = [
 ];
 
 function SettingsHome() {
-  const { theme, state, setTheme, updateUser } = useApp();
+  const { theme, state, setTheme, updateUser, background, setBackground } = useApp();
   const { currentUser, isAdmin, signOut, updateProfile } = useAuth();
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -133,9 +137,15 @@ function SettingsHome() {
   const [editAvatar, setEditAvatar] = useState(state.user.avatar);
   const [cacheCleared, setCacheCleared] = useState(false);
   const [faqOpen, setFaqOpen] = useState<string | null>(null);
-  const [linkedDevices, setLinkedDevices] = useState([
-    { id: 'current', name: 'This browser', detail: 'Windows · Active now', current: true },
-    { id: 'phone', name: 'iPhone 15 Pro', detail: 'Last active yesterday at 22:14', current: false },
+  const [linkedDevices, setLinkedDevices] = useState(() => [
+    {
+      id: 'current',
+      name: Platform.OS === 'web' ? 'This browser' : 'This device',
+      detail: `${
+        Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : 'Web'
+      } · Active now`,
+      current: true,
+    },
   ]);
   const [linkHelp, setLinkHelp] = useState(false);
 
@@ -168,10 +178,9 @@ function SettingsHome() {
   };
 
   const invite = () => {
-    Alert.alert(
-      'Invite a friend',
-      'Share your invite link: https://wa.me/919876500123',
-    );
+    const digits = state.user.phone.replace(/[^0-9]/g, '');
+    const link = digits ? `https://wa.me/${digits}` : currentUser?.email ?? 'WhatsApp';
+    Alert.alert('Invite a friend', `Share your invite link: ${link}`);
   };
 
   const themeOptions = [
@@ -182,7 +191,7 @@ function SettingsHome() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.panel }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.page}>
+        <FadeSlideIn style={styles.page} offset={10}>
           <View style={styles.header}>
             <View>
               <Text style={[styles.title, { color: theme.text }]}>Settings</Text>
@@ -524,7 +533,7 @@ function SettingsHome() {
               WhatsApp Web · Demo experience · Built with Expo
             </Text>
           </View>
-        </View>
+        </FadeSlideIn>
       </ScrollView>
 
       <Sheet
@@ -790,6 +799,65 @@ function SettingsHome() {
           })}
         </View>
         <Text style={[styles.sheetSectionLabel, { color: theme.textMuted, marginTop: 16 }]}>
+          CHAT BACKGROUND
+        </Text>
+        <Text style={[styles.bgHint, { color: theme.textSecondary }]}>
+          Pick an animated wallpaper for your conversations. It stays on this device.
+        </Text>
+        <View style={styles.bgGrid}>
+          {BACKGROUND_PRESETS.map((preset) => {
+            const active = background.id === preset.id;
+            const inner = (
+              <>
+                <View style={styles.bgSwatchScrim} />
+                <View style={styles.bgSwatchInner}>
+                  <Text style={styles.bgSwatchLabel} numberOfLines={1}>
+                    {preset.label}
+                  </Text>
+                </View>
+                {active ? (
+                  <View style={[styles.bgCheck, { backgroundColor: theme.accent }]}>
+                    <Check color="#ffffff" size={11} strokeWidth={3} />
+                  </View>
+                ) : null}
+              </>
+            );
+            return (
+              <Pressable
+                key={preset.id}
+                onPress={() => setBackground(preset)}
+                accessibilityRole="button"
+                accessibilityLabel={`Use ${preset.label} chat background`}
+                style={({ pressed }) => [
+                  styles.bgSwatch,
+                  { borderColor: active ? theme.accent : theme.border },
+                  pressed && { opacity: 0.78 },
+                ]}
+              >
+                {preset.kind === 'image' && preset.image ? (
+                  <ImageBackground
+                    source={{ uri: preset.image }}
+                    style={styles.bgSwatchImage}
+                    imageStyle={styles.bgSwatchRadius}
+                  >
+                    {inner}
+                  </ImageBackground>
+                ) : (
+                  <LinearGradient
+                    colors={preset.colors ?? ['#061b20', '#0d3b3a', '#155e63']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.bgSwatchImage}
+                  >
+                    {inner}
+                  </LinearGradient>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.sheetSectionLabel, { color: theme.textMuted, marginTop: 16 }]}>
           CONVERSATIONS
         </Text>
         <ToggleRow
@@ -896,7 +964,7 @@ function SettingsHome() {
         visible={devicesOpen}
         onClose={() => setDevicesOpen(false)}
         title="Linked devices"
-        subtitle="Devices signed in to this demo account"
+        subtitle="Devices signed in to this account"
         maxWidth={460}
       >
         {linkedDevices.map((device) => (
@@ -1674,6 +1742,58 @@ const styles = StyleSheet.create({
   sheetThemeText: {
     fontSize: 11.5,
     fontWeight: '600',
+  },
+  bgHint: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  bgGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  bgSwatch: {
+    width: '31.5%',
+    height: 72,
+    borderRadius: 12,
+    borderWidth: 2,
+    overflow: 'hidden',
+  },
+  bgSwatchImage: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  bgSwatchRadius: {
+    borderRadius: 10,
+  },
+  bgSwatchScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  bgSwatchInner: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 7,
+  },
+  bgSwatchLabel: {
+    color: '#ffffff',
+    fontSize: 10.5,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowRadius: 4,
+  },
+  bgCheck: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   storageTotal: {
     flexDirection: 'row',

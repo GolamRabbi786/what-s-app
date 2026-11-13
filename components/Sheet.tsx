@@ -1,7 +1,10 @@
 import { X } from 'lucide-react-native';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
+  Animated,
+  Easing,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -40,6 +43,18 @@ export function Sheet({
   const panelBg = dark ? '#111b21' : theme.panel;
   const textColor = dark ? '#e9edef' : theme.text;
   const secondary = dark ? '#8696a0' : theme.textSecondary;
+  const progress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    progress.setValue(0);
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [visible, progress]);
 
   return (
     <Modal
@@ -56,7 +71,7 @@ export function Sheet({
           onPress={onClose}
           style={StyleSheet.absoluteFill}
         />
-        <View
+        <Animated.View
           style={[
             styles.panel,
             {
@@ -65,6 +80,21 @@ export function Sheet({
               width: compact ? width - 24 : Math.min(width - 48, maxWidth),
               maxHeight: compact ? height - 48 : height - 80,
               borderRadius: compact ? 20 : 18,
+              opacity: progress,
+              transform: [
+                {
+                  translateY: progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  }),
+                },
+                {
+                  scale: progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.97, 1],
+                  }),
+                },
+              ],
             },
           ]}
         >
@@ -108,7 +138,7 @@ export function Sheet({
               {footer}
             </View>
           ) : null}
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );

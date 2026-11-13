@@ -1,3 +1,6 @@
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import {
   Archive,
   ArrowLeft,
@@ -19,6 +22,7 @@ import {
   Paperclip,
   Pause,
   Phone,
+  PhoneMissed,
   Play,
   Search,
   Send,
@@ -44,10 +48,10 @@ import {
 } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { formatClock, formatDateLabel } from '../lib/format';
-import { CallParticipant, Chat, Message, ReplyTo } from '../lib/types';
+import { Chat, Contact, Message, ReplyTo } from '../lib/types';
+import { AnimatedBackground } from './AnimatedBackground';
 import { Avatar } from './Avatar';
 import { FadeSlideIn } from './Motion';
-import { CallOverlay } from './CallOverlay';
 import { Sheet } from './Sheet';
 
 interface ChatWindowProps {
@@ -64,12 +68,6 @@ const EMOJIS = ['😀', '😂', '🥰', '😍', '🤔', '😅', '👍', '🙏', 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 const SENDER_COLORS = ['#e17076', '#7bc862', '#65aadd', '#a695e7', '#ee7aae', '#faa774', '#00a884'];
-
-const PHOTO_ATTACHMENTS = [
-  'https://images.pexels.com/photos/1105766/pexels-photo-1105766.jpeg?auto=compress&cs=tinysrgb&w=1000',
-  'https://images.pexels.com/photos/302899/pexels-photo-302899.jpeg?auto=compress&cs=tinysrgb&w=1000',
-  'https://images.pexels.com/photos/189349/pexels-photo-189349.jpeg?auto=compress&cs=tinysrgb&w=1000',
-];
 
 function senderColor(name: string) {
   let hash = 0;
@@ -92,6 +90,9 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     toggleChatFlag,
     clearChatMessages,
     closeChat,
+    setTypingMode,
+    startCallSession,
+    background,
   } = useApp();
   const { width } = useWindowDimensions();
   const [paneWidth, setPaneWidth] = useState(0);
@@ -99,6 +100,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
@@ -107,7 +109,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
-  const [callType, setCallType] = useState<'voice' | 'video' | null>(null);
+
   const listRef = useRef<FlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
   const messages = state.messages[chat.id] ?? [];
@@ -124,7 +126,6 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     setSearchQuery('');
     setPlayingId(null);
     setRecording(false);
-    setCallType(null);
   }, [chat.id]);
 
   useEffect(() => {
@@ -165,8 +166,29 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     return () => clearTimeout(timeout);
   }, [messages.length, chat.id, chatIsTyping, searchQuery]);
 
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      setTypingMode(chat.id, 'idle');
+    };
+  }, [chat.id, setTypingMode]);
+
+  const handleDraftChange = (value: string) => {
+    setDraft(value);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    if (value.trim()) {
+      setTypingMode(chat.id, 'typing');
+      typingTimer.current = setTimeout(() => setTypingMode(chat.id, 'idle'), 2600);
+    } else {
+      setTypingMode(chat.id, 'idle');
+    }
+  };
+
   const handleSend = () => {
     if (!draft.trim()) return;
+    setTypingMode(chat.id, 'idle');
     sendMessage(chat.id, draft, replyTo ? { replyTo } : undefined);
     setDraft('');
     setReplyTo(null);
@@ -209,6 +231,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     const duration = formatSeconds(Math.max(1, recordSeconds));
     setRecording(false);
     setRecordSeconds(0);
+    setTypingMode(chat.id, 'idle');
     if (!discard) {
       sendMessage(chat.id, '', { kind: 'voice', duration });
     }
@@ -228,12 +251,101 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     closeChat();
   };
 
-  const attachPhoto = (index: number) => {
-    const captions = ['A little preview of tonight 🌇', 'Coffee and a quiet corner ☕', 'The view from the rooftop ✨'];
-    sendMessage(chat.id, captions[index], {
-      kind: 'image',
-      image: PHOTO_ATTACHMENTS[index],
-    });
+  const attachPhoto = async (fromCamera: boolean) => {
+    try {
+      const permission = fromCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission needed',
+          fromCamera
+            ? 'Allow camera access to take a photo.'
+            : 'Allow photo access to share an image.',
+        );
+        return;
+      }
+
+      const result = fromCamera
+        ? await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'],
+            quality: 0.55,
+            base64: true,
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.55,
+            base64: true,
+          });
+
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const image = asset.base64
+        ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+        : asset.uri;
+      if (!image) return;
+      sendMessage(chat.id, '', { kind: 'image', image });
+      setAttachOpen(false);
+    } catch (error) {
+      Alert.alert(
+        'Unable to attach photo',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    }
+  };
+
+  const attachDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const file = result.assets[0];
+      const size = file.size
+        ? file.size >= 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.max(1, Math.round(file.size / 1024))} KB`
+        : undefined;
+      sendMessage(chat.id, '', {
+        kind: 'document',
+        fileName: file.name,
+        fileSize: size,
+      });
+      setAttachOpen(false);
+    } catch (error) {
+      Alert.alert(
+        'Unable to attach document',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    }
+  };
+
+  const attachLocation = async () => {
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Allow location access to share where you are.');
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const label = `${position.coords.latitude.toFixed(5)}, ${position.coords.longitude.toFixed(5)}`;
+      sendMessage(chat.id, label, { kind: 'location' });
+      setAttachOpen(false);
+    } catch (error) {
+      Alert.alert(
+        'Unable to share location',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    }
+  };
+
+  const shareContact = (contact: Contact) => {
+    const detail = contact.phone || contact.username || contact.name;
+    sendMessage(chat.id, `${contact.name} · ${detail}`, { kind: 'text' });
+    setContactPickerOpen(false);
     setAttachOpen(false);
   };
 
@@ -382,7 +494,34 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             </View>
           ) : null}
 
-          {message.text && message.kind !== 'document' && message.kind !== 'location' ? (
+          {message.kind === 'call' ? (
+            <View style={styles.callRow}>
+              <View
+                style={[
+                  styles.callIcon,
+                  { backgroundColor: message.text.toLowerCase().includes('missed') ? '#fdeceb' : theme.accentSoft },
+                ]}
+              >
+                {message.text.toLowerCase().includes('missed') ? (
+                  <PhoneMissed color={theme.danger} size={19} />
+                ) : message.text.toLowerCase().includes('video') ? (
+                  <Video color={theme.accentDark} size={19} />
+                ) : (
+                  <Phone color={theme.accentDark} size={18} />
+                )}
+              </View>
+              <View style={styles.callInfo}>
+                <Text style={[styles.callTitle, { color: theme.bubbleText }]} numberOfLines={2}>
+                  {message.text}
+                </Text>
+                <Text style={[styles.callSub, { color: theme.textSecondary }]}>
+                  Call in this chat
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          {message.text && message.kind !== 'document' && message.kind !== 'location' && message.kind !== 'call' ? (
             <Text
               style={[
                 styles.messageText,
@@ -440,19 +579,26 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
 
   const lastImages = messages.filter((message) => message.image).slice(-4);
 
-  const callParticipants: CallParticipant[] = chat.group
-    ? state.chats
-        .filter((item) => !item.group && item.id !== 'self' && item.id !== chat.id)
-        .slice(0, 3)
-        .map((item) => ({ id: item.id, name: item.name, avatar: item.avatar }))
-    : [];
+  const startCall = (type: 'voice' | 'video') => {
+    if (!chat.peerId) {
+      Alert.alert(
+        'Group calls',
+        'Group calling is not available yet. Start a one-to-one voice or video call instead.',
+      );
+      return;
+    }
+    void startCallSession({ peerId: chat.peerId, chatId: chat.id, type });
+  };
 
   return (
     <View
       style={[styles.container, { backgroundColor: theme.chatBg }]}
       onLayout={(event) => setPaneWidth(event.nativeEvent.layout.width)}
     >
-      <ChatBackdrop color={theme.mode === 'dark' ? '#2a3942' : '#c8beb2'} />
+      <AnimatedBackground
+        background={background}
+        dim={theme.mode === 'dark' ? 0.5 : 0.28}
+      />
 
       <View
         style={[
@@ -494,7 +640,9 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
               numberOfLines={1}
             >
               {chatIsTyping
-                ? `${typing?.label} is typing…`
+                ? typing?.mode === 'recording'
+                  ? `${typing?.label} is recording audio…`
+                  : `${typing?.label} is typing…`
                 : chat.group
                   ? `${chat.members ?? 0} members`
                   : chat.online
@@ -507,7 +655,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Video call"
-            onPress={() => setCallType('video')}
+            onPress={() => startCall('video')}
             style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.65 }]}
           >
             <Video color={theme.icon} size={20} />
@@ -515,7 +663,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Voice call"
-            onPress={() => setCallType('voice')}
+            onPress={() => startCall('voice')}
             style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.65 }]}
           >
             <Phone color={theme.icon} size={19} />
@@ -624,7 +772,9 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                 <View style={[styles.typingDot, { backgroundColor: theme.textMuted, opacity: 0.35 }]} />
               </View>
               <Text style={[styles.typingText, { color: theme.textSecondary }]}>
-                {typing?.label} is typing
+                {typing?.mode === 'recording'
+                  ? `${typing?.label} is recording audio`
+                  : `${typing?.label} is typing`}
               </Text>
             </View>
           ) : null
@@ -731,7 +881,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
               <TextInput
                 ref={inputRef}
                 value={draft}
-                onChangeText={setDraft}
+                onChangeText={handleDraftChange}
                 placeholder="Type a message"
                 placeholderTextColor={theme.textMuted}
                 multiline
@@ -768,6 +918,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                 onPress={() => {
                   setRecording(true);
                   setRecordSeconds(0);
+                  setTypingMode(chat.id, 'recording');
                 }}
                 style={({ pressed }) => [
                   styles.sendButton,
@@ -788,7 +939,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             icon={ImageIcon}
             label="Photos"
             color="#5b6cff"
-            onPress={() => attachPhoto(0)}
+            onPress={() => void attachPhoto(false)}
             textColor={theme.text}
             secondary={theme.textSecondary}
           />
@@ -796,7 +947,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             icon={Camera}
             label="Camera"
             color="#e17076"
-            onPress={() => attachPhoto(1)}
+            onPress={() => void attachPhoto(true)}
             textColor={theme.text}
             secondary={theme.textSecondary}
           />
@@ -804,14 +955,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             icon={FileText}
             label="Document"
             color="#00a884"
-            onPress={() => {
-              sendMessage(chat.id, '', {
-                kind: 'document',
-                fileName: 'project-brief.pdf',
-                fileSize: '2.4 MB',
-              });
-              setAttachOpen(false);
-            }}
+            onPress={() => void attachDocument()}
             textColor={theme.text}
             secondary={theme.textSecondary}
           />
@@ -819,10 +963,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             icon={MapPin}
             label="Location"
             color="#f2994a"
-            onPress={() => {
-              sendMessage(chat.id, 'Indiranagar, Bengaluru', { kind: 'location' });
-              setAttachOpen(false);
-            }}
+            onPress={() => void attachLocation()}
             textColor={theme.text}
             secondary={theme.textSecondary}
           />
@@ -830,10 +971,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             icon={User}
             label="Contact"
             color="#9b51e0"
-            onPress={() => {
-              sendMessage(chat.id, 'Maya Kapoor · +91 98765 43210', { kind: 'text' });
-              setAttachOpen(false);
-            }}
+            onPress={() => setContactPickerOpen(true)}
             textColor={theme.text}
             secondary={theme.textSecondary}
           />
@@ -849,6 +987,48 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             secondary={theme.textSecondary}
           />
         </View>
+      </Sheet>
+
+      <Sheet
+        visible={contactPickerOpen}
+        onClose={() => setContactPickerOpen(false)}
+        title="Share a contact"
+        subtitle="Pick someone from your contacts"
+        maxWidth={430}
+      >
+        {state.contacts.length === 0 ? (
+          <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20 }}>
+            No other accounts are registered yet. Invite someone to join first.
+          </Text>
+        ) : (
+          state.contacts.map((contact) => (
+            <Pressable
+              key={contact.id}
+              onPress={() => shareContact(contact)}
+              style={({ pressed }) => [
+                styles.contactRow,
+                { borderBottomColor: theme.border },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Avatar
+                name={contact.name}
+                uri={contact.avatar}
+                size={38}
+                showOnline={contact.online}
+                online={contact.online}
+              />
+              <View style={styles.contactText}>
+                <Text style={[styles.contactName, { color: theme.text }]} numberOfLines={1}>
+                  {contact.name}
+                </Text>
+                <Text style={[styles.contactMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                  {contact.phone || `@${contact.username}`}
+                </Text>
+              </View>
+            </Pressable>
+          ))
+        )}
       </Sheet>
 
       <Sheet visible={menuOpen} onClose={() => setMenuOpen(false)} title={chat.name} subtitle="Chat options" maxWidth={400}>
@@ -1037,24 +1217,14 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                 {chat.members} members
               </Text>
               <Text style={[styles.infoRowSub, { color: theme.textSecondary }]}>
-                You, Maya, Rohan, Priya, Arjun and 7 others
+                You and {Math.max(0, (chat.members ?? 1) - 1)} other
+                {(chat.members ?? 1) - 1 === 1 ? '' : 's'} in this group
               </Text>
             </View>
           </View>
         ) : null}
       </Sheet>
 
-      {callType ? (
-        <CallOverlay
-          visible={Boolean(callType)}
-          contactId={chat.id}
-          name={chat.name}
-          avatar={chat.avatar}
-          type={callType}
-          participants={callParticipants}
-          onClose={() => setCallType(null)}
-        />
-      ) : null}
     </View>
   );
 }
@@ -1132,94 +1302,6 @@ function ChatBubbleIcon({ color }: { color: string }) {
           borderBottomWidth: 2,
           borderColor: color,
           transform: [{ rotate: '-35deg' }],
-        }}
-      />
-    </View>
-  );
-}
-
-function ChatBackdrop({ color }: { color: string }) {
-  const doodles = [
-    { top: '6%', left: '7%', rotate: '-12deg', size: 34 },
-    { top: '13%', left: '72%', rotate: '18deg', size: 26 },
-    { top: '24%', left: '38%', rotate: '8deg', size: 30 },
-    { top: '31%', left: '88%', rotate: '-9deg', size: 24 },
-    { top: '41%', left: '14%', rotate: '14deg', size: 28 },
-    { top: '49%', left: '58%', rotate: '-15deg', size: 34 },
-    { top: '58%', left: '28%', rotate: '6deg', size: 22 },
-    { top: '68%', left: '78%', rotate: '-7deg', size: 30 },
-    { top: '76%', left: '9%', rotate: '17deg', size: 25 },
-    { top: '85%', left: '48%', rotate: '-12deg', size: 32 },
-    { top: '18%', left: '52%', rotate: '-4deg', size: 22 },
-    { top: '61%', left: '92%', rotate: '10deg', size: 22 },
-    { top: '89%', left: '70%', rotate: '14deg', size: 24 },
-  ] as const;
-
-  return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      {doodles.map((doodle, index) => (
-        <View
-          key={`doodle-${index}`}
-          style={{
-            position: 'absolute',
-            top: doodle.top,
-            left: doodle.left,
-            transform: [{ rotate: doodle.rotate }],
-            opacity: 0.22,
-          }}
-        >
-          <MessageDoodle color={color} size={doodle.size} />
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function MessageDoodle({ color, size }: { color: string; size: number }) {
-  return (
-    <View style={{ width: size, height: size * 0.8, opacity: 0.55 }}>
-      <View
-        style={{
-          width: size,
-          height: size * 0.64,
-          borderRadius: size * 0.22,
-          borderWidth: 1.5,
-          borderColor: color,
-        }}
-      />
-      <View
-        style={{
-          position: 'absolute',
-          left: size * 0.16,
-          bottom: 0,
-          width: size * 0.2,
-          height: size * 0.2,
-          borderLeftWidth: 1.5,
-          borderBottomWidth: 1.5,
-          borderColor: color,
-          transform: [{ rotate: '-38deg' }],
-        }}
-      />
-      <View
-        style={{
-          position: 'absolute',
-          top: size * 0.2,
-          left: size * 0.18,
-          width: size * 0.42,
-          height: 1.5,
-          backgroundColor: color,
-          borderRadius: 2,
-        }}
-      />
-      <View
-        style={{
-          position: 'absolute',
-          top: size * 0.34,
-          left: size * 0.18,
-          width: size * 0.3,
-          height: 1.5,
-          backgroundColor: color,
-          borderRadius: 2,
         }}
       />
     </View>
@@ -1540,6 +1622,32 @@ const styles = StyleSheet.create({
   locationInfo: {
     flex: 1,
   },
+  callRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 2,
+    minWidth: 210,
+  },
+  callIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callInfo: {
+    flex: 1,
+  },
+  callTitle: {
+    fontSize: 13.5,
+    fontWeight: '600',
+  },
+  callSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
   reactionTag: {
     position: 'absolute',
     bottom: -10,
@@ -1859,5 +1967,23 @@ const styles = StyleSheet.create({
   infoRowSub: {
     fontSize: 12,
     lineHeight: 17,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  contactText: {
+    flex: 1,
+    gap: 3,
+  },
+  contactName: {
+    fontSize: 14.5,
+    fontWeight: '600',
+  },
+  contactMeta: {
+    fontSize: 12.5,
   },
 });

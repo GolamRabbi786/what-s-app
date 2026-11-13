@@ -22,6 +22,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { Avatar } from './Avatar';
 import { FadeIn } from './Motion';
+import { CallOverlay, IncomingCallOverlay } from './CallOverlay';
 
 export type TabKey = 'chats' | 'updates' | 'communities' | 'calls' | 'settings';
 
@@ -46,7 +47,14 @@ interface AppShellProps {
 }
 
 export function AppShell({ active, children }: AppShellProps) {
-  const { theme, state, toggleTheme } = useApp();
+  const {
+    theme,
+    state,
+    toggleTheme,
+    activeCall,
+    incomingCall,
+    respondToCall,
+  } = useApp();
   const { isAdmin } = useAuth();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -62,6 +70,21 @@ export function AppShell({ active, children }: AppShellProps) {
     if (item.key === active) return;
     router.replace(item.href as never);
   };
+
+  const callLayer = (
+    <>
+      {activeCall ? (
+        <CallOverlay call={activeCall} onClose={() => undefined} />
+      ) : null}
+      {!activeCall && incomingCall ? (
+        <IncomingCallOverlay
+          call={incomingCall}
+          onAccept={() => void respondToCall('accept', incomingCall.id)}
+          onDecline={() => void respondToCall('decline', incomingCall.id)}
+        />
+      ) : null}
+    </>
+  );
 
   if (desktop) {
     return (
@@ -167,6 +190,7 @@ export function AppShell({ active, children }: AppShellProps) {
           </View>
         </View>
         <View style={styles.content}>{children}</View>
+        {callLayer}
       </View>
     );
   }
@@ -230,6 +254,7 @@ export function AppShell({ active, children }: AppShellProps) {
           );
         })}
       </View>
+      {callLayer}
     </View>
   );
 }

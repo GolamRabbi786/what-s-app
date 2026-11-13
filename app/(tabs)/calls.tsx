@@ -16,6 +16,7 @@ import {
 } from 'lucide-react-native';
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -26,7 +27,7 @@ import {
 } from 'react-native';
 import { AppShell } from '../../components/AppShell';
 import { Avatar } from '../../components/Avatar';
-import { CallOverlay } from '../../components/CallOverlay';
+import { FadeSlideIn } from '../../components/Motion';
 import { Sheet } from '../../components/Sheet';
 import { useApp } from '../../context/AppContext';
 import { formatListDate } from '../../lib/format';
@@ -42,16 +43,8 @@ export default function CallsScreen() {
 
 type CallFilter = 'all' | 'missed' | 'voice' | 'video';
 
-interface CallTarget {
-  contactId: string;
-  name: string;
-  avatar?: string;
-  type: 'voice' | 'video';
-  participants?: { id: string; name: string; avatar?: string }[];
-}
-
 function CallsHome() {
-  const { theme, state, clearCalls } = useApp();
+  const { theme, state, clearCalls, startCallSession } = useApp();
   const { width } = useWindowDimensions();
   const wide = width >= 1040;
   const [filter, setFilter] = useState<CallFilter>('all');
@@ -59,7 +52,6 @@ function CallsHome() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [callType, setCallType] = useState<'voice' | 'video'>('voice');
-  const [callTarget, setCallTarget] = useState<CallTarget | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
   const [groupSelected, setGroupSelected] = useState<string[]>([]);
 
@@ -99,10 +91,14 @@ function CallsHome() {
     return !query || contact.name.toLowerCase().includes(query) || (contact.phone ?? '').includes(query);
   });
 
-  const startCall = (target: CallTarget) => {
+  const startCall = (target: { contactId: string; type: 'voice' | 'video' }) => {
     setNewCallOpen(false);
     setSearch('');
-    setCallTarget(target);
+    if (!target.contactId || target.contactId === 'unknown') {
+      Alert.alert('Unable to call', 'This contact is no longer available.');
+      return;
+    }
+    void startCallSession({ peerId: target.contactId, type: target.type });
   };
 
   const chips: { key: CallFilter; label: string; count: number }[] = [
@@ -288,27 +284,18 @@ function CallsHome() {
                       if (!search.trim()) return true;
                       return call.name.toLowerCase().includes(search.trim().toLowerCase());
                     })
-                    .map((call) => (
-                      <CallRow
-                        key={call.id}
-                        call={call}
-                        onVoice={() =>
-                          startCall({
-                            contactId: call.contactId,
-                            name: call.name,
-                            avatar: call.avatar,
-                            type: 'voice',
-                          })
-                        }
-                        onVideo={() =>
-                          startCall({
-                            contactId: call.contactId,
-                            name: call.name,
-                            avatar: call.avatar,
-                            type: 'video',
-                          })
-                        }
-                      />
+                    .map((call, index) => (
+                      <FadeSlideIn key={call.id} delay={Math.min(index, 8) * 45}>
+                        <CallRow
+                          call={call}
+                          onVoice={() =>
+                            startCall({ contactId: call.contactId, type: 'voice' })
+                          }
+                          onVideo={() =>
+                            startCall({ contactId: call.contactId, type: 'video' })
+                          }
+                        />
+                      </FadeSlideIn>
                     ))}
                 </View>
               </View>
@@ -399,12 +386,7 @@ function CallsHome() {
             <Pressable
               key={contact.id}
               onPress={() =>
-                startCall({
-                  contactId: contact.id,
-                  name: contact.name,
-                  avatar: contact.avatar,
-                  type: callType,
-                })
+                startCall({ contactId: contact.id, type: callType })
               }
               style={({ pressed }) => [
                 styles.contactRow,
@@ -479,16 +461,11 @@ function CallsHome() {
               if (chosen.length < 2) return;
               setGroupOpen(false);
               setGroupSelected([]);
-              setCallTarget({
-                contactId: 'group-call',
-                name: 'Team huddle',
-                type: 'video',
-                participants: chosen.map((contact) => ({
-                  id: contact.id,
-                  name: contact.name,
-                  avatar: contact.avatar,
-                })),
-              });
+              void startCallSession({ peerId: chosen[0].id, type: 'video' });
+              Alert.alert(
+                'Group calling',
+                `Group calling is coming soon. Starting a video call with ${chosen[0].name}.`,
+              );
             }}
             style={({ pressed }) => [
               styles.groupStart,
@@ -568,17 +545,6 @@ function CallsHome() {
         })}
       </Sheet>
 
-      {callTarget ? (
-        <CallOverlay
-          visible={Boolean(callTarget)}
-          contactId={callTarget.contactId}
-          name={callTarget.name}
-          avatar={callTarget.avatar}
-          type={callTarget.type}
-          participants={callTarget.participants}
-          onClose={() => setCallTarget(null)}
-        />
-      ) : null}
     </View>
   );
 }

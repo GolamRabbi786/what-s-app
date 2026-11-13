@@ -300,7 +300,13 @@ function ChatsHome() {
               <ChatRow
                 chat={item}
                 active={activeChatId === item.id}
-                typingLabel={typing?.chatId === item.id ? typing.label : null}
+                typingLabel={
+                  typing?.chatId === item.id
+                    ? typing.mode === 'recording'
+                      ? `${typing.label} is recording audio…`
+                      : `${typing.label} is typing…`
+                    : null
+                }
                 preview={getChatPreview(item, state.messages)}
                 onPress={() => openChat(item.id)}
               />
@@ -578,7 +584,7 @@ function ChatRow({
                 },
               ]}
             >
-              {typingLabel ? `${typingLabel} is typing…` : preview}
+              {typingLabel ?? preview}
             </Text>
           </View>
           {chat.favorite ? <Star color={theme.warning} size={12} fill={theme.warning} /> : null}

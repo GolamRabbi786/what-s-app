@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { AppShell } from '../../components/AppShell';
 import { Avatar } from '../../components/Avatar';
+import { FadeSlideIn } from '../../components/Motion';
 import { NewStatusModal } from '../../components/NewStatusModal';
 import { Sheet } from '../../components/Sheet';
 import { StatusViewer } from '../../components/StatusViewer';
@@ -239,8 +240,10 @@ function UpdatesHome() {
                 </View>
               ) : (
                 <View style={[styles.statusList, { borderColor: theme.border }]}>
-                  {recent.map((status) => (
-                    <StatusRow key={status.id} status={status} onPress={() => setViewerId(status.id)} />
+                  {recent.map((status, index) => (
+                    <FadeSlideIn key={status.id} delay={Math.min(index, 8) * 45}>
+                      <StatusRow status={status} onPress={() => setViewerId(status.id)} />
+                    </FadeSlideIn>
                   ))}
                 </View>
               )}
@@ -256,13 +259,14 @@ function UpdatesHome() {
                     </View>
                   </View>
                   <View style={[styles.statusList, { borderColor: theme.border }]}>
-                    {viewed.map((status) => (
-                      <StatusRow
-                        key={status.id}
-                        status={status}
-                        viewed
-                        onPress={() => setViewerId(status.id)}
-                      />
+                    {viewed.map((status, index) => (
+                      <FadeSlideIn key={status.id} delay={Math.min(index, 8) * 40}>
+                        <StatusRow
+                          status={status}
+                          viewed
+                          onPress={() => setViewerId(status.id)}
+                        />
+                      </FadeSlideIn>
                     ))}
                   </View>
                 </>
@@ -359,24 +363,39 @@ function UpdatesHome() {
                 <View style={[styles.sideCard, { backgroundColor: theme.panelAlt, borderColor: theme.border }]}>
                   <Text style={[styles.tipsTitle, { color: theme.text }]}>Recent viewers</Text>
                   <Text style={[styles.viewerSub, { color: theme.textSecondary }]}>
-                    Maya, Rohan and 14 others viewed your status
+                    {myStatus.viewers && myStatus.viewers.length > 0
+                      ? `${myStatus.viewers.length} ${
+                          myStatus.viewers.length === 1 ? 'person' : 'people'
+                        } viewed your status`
+                      : 'No views yet — your status is live for 24 hours'}
                   </Text>
-                  <View style={styles.viewerAvatars}>
-                    {state.chats.slice(0, 5).map((chat, index) => (
-                      <View
-                        key={chat.id}
-                        style={[
-                          styles.viewerAvatar,
-                          { borderColor: theme.panelAlt, marginLeft: index === 0 ? 0 : -8 },
-                        ]}
-                      >
-                        <Avatar name={chat.name} uri={chat.avatar} size={30} />
-                      </View>
-                    ))}
-                    <View style={[styles.viewerMore, { backgroundColor: theme.chip, borderColor: theme.panelAlt }]}>
-                      <Text style={[styles.viewerMoreText, { color: theme.textSecondary }]}>+14</Text>
+                  {myStatus.viewers && myStatus.viewers.length > 0 ? (
+                    <View style={styles.viewerAvatars}>
+                      {myStatus.viewers.slice(0, 5).map((viewer, index) => (
+                        <View
+                          key={viewer.name}
+                          style={[
+                            styles.viewerAvatar,
+                            { borderColor: theme.panelAlt, marginLeft: index === 0 ? 0 : -8 },
+                          ]}
+                        >
+                          <Avatar name={viewer.name} uri={viewer.avatar} size={30} />
+                        </View>
+                      ))}
+                      {myStatus.viewers.length > 5 ? (
+                        <View
+                          style={[
+                            styles.viewerMore,
+                            { backgroundColor: theme.chip, borderColor: theme.panelAlt },
+                          ]}
+                        >
+                          <Text style={[styles.viewerMoreText, { color: theme.textSecondary }]}>
+                            +{myStatus.viewers.length - 5}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
-                  </View>
+                  ) : null}
                 </View>
               ) : null}
             </View>

@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import {
   Mic,
   MicOff,
-  MonitorUp,
+  PhoneIncoming,
   PhoneOff,
   ScreenShare,
   ScreenShareOff,
@@ -14,9 +14,10 @@ import {
   VolumeX,
   X,
 } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -25,192 +26,153 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { playCallEndSound, startRingtone, stopRingtone } from '../lib/sounds';
-import { CallParticipant } from '../lib/types';
+import type { CallSession } from '../lib/types';
 import { Avatar } from './Avatar';
+import { Pulse } from './Motion';
 
-interface CallOverlayProps {
-  visible: boolean;
-  contactId: string;
-  name: string;
-  avatar?: string;
-  type: 'voice' | 'video';
-  participants?: CallParticipant[];
-  onClose: () => void;
-}
-
-function formatCallTime(seconds: number) {
+function formatDuration(seconds: number) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-export function CallOverlay({
-  visible,
-  contactId,
-  name,
-  avatar,
-  type,
-  participants = [],
-  onClose,
-}: CallOverlayProps) {
-  const { addCall } = useApp();
+export function CallOverlay({ call, onClose }: { call: CallSession; onClose: () => void }) {
+  const { endCallSession } = useApp();
+  const { currentUser } = useAuth();
   const { width } = useWindowDimensions();
   const compact = width < 700;
   const [seconds, setSeconds] = useState(0);
-  const [connected, setConnected] = useState(false);
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(false);
-  const [videoOn, setVideoOn] = useState(type === 'video');
+  const [videoOn, setVideoOn] = useState(call.type === 'video');
   const [screenSharing, setScreenSharing] = useState(false);
   const [showPeople, setShowPeople] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const shareRef = useRef<View>(null);
+  const streamRef = useRef<{ getTracks: () => { stop: () => void }[] } | null>(null);
 
-  const remotes: CallParticipant[] =
-    participants.length > 0 ? participants : [{ id: contactId, name, avatar }];
-  const isGroup = remotes.length > 1;
+  const outgoing = call.callerId === currentUser?.id;
+  const peerName = outgoing ? call.calleeName : call.callerName;
+  const peerAvatar = outgoing ? call.calleeAvatar : call.callerAvatar;
+  const connected = call.status === 'connected';
 
   useEffect(() => {
-    if (!visible) return;
-    setSeconds(0);
-    setConnected(false);
-    setMuted(false);
-    setSpeaker(false);
-    setVideoOn(type === 'video');
-    setScreenSharing(false);
-    setShowPeople(false);
-    void startRingtone();
-    const connectTimer = setTimeout(() => {
+    if (connected) {
       stopRingtone();
-      setConnected(true);
-    }, 2100);
-    const interval = setInterval(() => setSeconds((value) => value + 1), 1000);
+      const started = call.connectedAt ? new Date(call.connectedAt).getTime() : Date.now();
+      const update = () => setSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+      update();
+      const timer = setInterval(update, 1000);
+      return () => clearInterval(timer);
+    }
+    setSeconds(0);
+    if (call.status === 'calling' || call.status === 'ringing') {
+      void startRingtone();
+    }
     return () => {
       stopRingtone();
-      clearTimeout(connectTimer);
-      clearInterval(interval);
     };
-  }, [visible, contactId, type]);
+  }, [connected, call.status, call.connectedAt]);
 
   useEffect(() => {
-    if (!visible || type !== 'video' || !videoOn) return;
+    if (call.type !== 'video' || !videoOn) return;
     if (permission && !permission.granted && permission.canAskAgain) {
       requestPermission().catch(() => undefined);
     }
-  }, [visible, type, videoOn, permission, requestPermission]);
+  }, [call.type, videoOn, permission, requestPermission]);
+
+  const stopScreenShare = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setScreenSharing(false);
+    if (Platform.OS === 'web') {
+      const node = shareRef.current as unknown as HTMLElement | null;
+      if (node) node.innerHTML = '';
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  const toggleScreenShare = async () => {
+    if (screenSharing) {
+      stopScreenShare();
+      return;
+    }
+    if (
+      Platform.OS !== 'web' ||
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices?.getDisplayMedia
+    ) {
+      setScreenSharing(true);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      streamRef.current = stream;
+      setScreenSharing(true);
+      const node = shareRef.current as unknown as HTMLElement | null;
+      if (node) {
+        node.innerHTML = '';
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.autoplay = true;
+        video.muted = true;
+        video.style.width = '100%';
+        video.style.height = '100%';
+        video.style.objectFit = 'contain';
+        node.appendChild(video);
+      }
+      stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+        setScreenSharing(false);
+        streamRef.current = null;
+      });
+    } catch {
+      setScreenSharing(false);
+    }
+  };
 
   const endCall = () => {
+    stopScreenShare();
     stopRingtone();
     void playCallEndSound();
-    addCall({
-      id: `call-${Date.now()}`,
-      contactId,
-      name: isGroup ? `${name} · ${remotes.length + 1} people` : name,
-      avatar,
-      direction: 'outgoing',
-      type,
-      at: new Date().toISOString(),
-      duration: connected ? formatCallTime(seconds) : undefined,
-    });
+    void endCallSession(call.id);
     onClose();
   };
 
-  const cameraReady = type === 'video' && videoOn && permission?.granted;
+  const cameraReady = call.type === 'video' && videoOn && permission?.granted;
 
-  const callLabel = isGroup
-    ? `Group ${type} call · ${remotes.length + 1} participants`
-    : `${type === 'video' ? 'Video' : 'Voice'} call`;
+  const statusLabel = connected
+    ? formatDuration(seconds)
+    : outgoing
+      ? call.status === 'ringing'
+        ? 'Ringing…'
+        : 'Calling…'
+      : 'Connecting…';
 
-  const selfTile = (
-    <View
-      key="self"
-      style={[
-        styles.tile,
-        { borderColor: 'rgba(0,168,132,0.55)' },
-      ]}
-    >
-      {cameraReady ? (
-        <CameraView style={StyleSheet.absoluteFill} facing="front" />
-      ) : (
-        <LinearGradient
-          colors={['#1c3a3a', '#0e1c1f']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-      )}
-      {!cameraReady ? (
-        <View style={styles.tileCenter}>
-          <Avatar name="You" size={compact ? 52 : 64} />
-          <Text style={styles.tileNameSmall}>Camera off</Text>
-        </View>
-      ) : null}
-      <View style={styles.tileFooter}>
-        <View style={styles.tileTag}>
-          <Text style={styles.tileTagText}>You</Text>
-        </View>
-        <View style={[styles.tileMic, { backgroundColor: muted ? '#ea4335' : 'rgba(0,0,0,0.45)' }]}>
-          {muted ? <MicOff color="#ffffff" size={11} /> : <Mic color="#ffffff" size={11} />}
-        </View>
-      </View>
-    </View>
-  );
-
-  const remoteTile = (participant: CallParticipant, index: number) => (
-    <View
-      key={participant.id}
-      style={[
-        styles.tile,
-        { borderColor: index === 0 && connected ? 'rgba(0,168,132,0.7)' : 'rgba(255,255,255,0.08)' },
-      ]}
-    >
-      <LinearGradient
-        colors={
-          index % 3 === 0
-            ? ['#1f3f43', '#0c181c']
-            : index % 3 === 1
-              ? ['#26354a', '#0c141c']
-              : ['#3a2f42', '#121018']
-        }
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={styles.tileCenter}>
-        <View style={styles.tileAvatarRing}>
-          <Avatar name={participant.name} uri={participant.avatar} size={compact ? 52 : 66} />
-        </View>
-        <Text style={styles.tileNameSmall} numberOfLines={1}>
-          {participant.name}
-        </Text>
-      </View>
-      <View style={styles.tileFooter}>
-        <View style={styles.tileTag}>
-          <Text style={styles.tileTagText} numberOfLines={1}>
-            {participant.name.split(' ')[0]}
-          </Text>
-        </View>
-        <View style={styles.tileMic}>
-          {participant.muted ? (
-            <MicOff color="#ffffff" size={11} />
-          ) : (
-            <Mic color="#ffffff" size={11} />
-          )}
-        </View>
-      </View>
-      {index === 0 && connected ? (
-        <View style={styles.speakingBadge}>
-          <View style={styles.speakingDot} />
-          <Text style={styles.speakingText}>Speaking</Text>
-        </View>
-      ) : null}
-    </View>
-  );
+  const hintLabel = connected
+    ? call.type === 'video'
+      ? 'Video connected · encrypted'
+      : 'Connected · encrypted'
+    : outgoing
+      ? call.status === 'ringing'
+        ? `${peerName} is online — waiting to answer`
+        : `${peerName} is offline — still calling`
+      : 'Answering…';
 
   return (
-    <Modal visible={visible} transparent statusBarTranslucent animationType="fade" onRequestClose={endCall}>
+    <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={endCall}>
       <LinearGradient
-        colors={type === 'video' ? ['#0d2b30', '#0b141a', '#0b141a'] : ['#0f3d34', '#0b141a', '#0b141a']}
+        colors={
+          call.type === 'video'
+            ? ['#0d2b30', '#0b141a', '#0b141a']
+            : ['#0f3d34', '#0b141a', '#0b141a']
+        }
         style={styles.root}
       >
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -220,7 +182,9 @@ export function CallOverlay({
                 <View style={styles.secureDot} />
                 <Text style={styles.secureText}>End-to-end encrypted</Text>
               </View>
-              <Text style={styles.callType}>{callLabel}</Text>
+              <Text style={styles.callType}>
+                {call.type === 'video' ? 'Video call' : 'Voice call'}
+              </Text>
             </View>
             <Pressable
               onPress={endCall}
@@ -233,92 +197,36 @@ export function CallOverlay({
 
           {screenSharing ? (
             <View style={styles.stage}>
-              <View style={styles.sharedWindow}>
-                <View style={styles.windowBar}>
-                  <View style={styles.windowDots}>
-                    <View style={[styles.windowDot, { backgroundColor: '#ff5f57' }]} />
-                    <View style={[styles.windowDot, { backgroundColor: '#febc2e' }]} />
-                    <View style={[styles.windowDot, { backgroundColor: '#28c840' }]} />
-                  </View>
-                  <Text style={styles.windowTitle}>Q4 roadmap — design review</Text>
-                  <View style={styles.liveSharePill}>
-                    <View style={styles.liveShareDot} />
-                    <Text style={styles.liveShareText}>LIVE</Text>
-                  </View>
-                </View>
-                <View style={styles.deck}>
-                  <Text style={styles.deckEyebrow}>WHATSAPP · PRODUCT</Text>
-                  <Text style={styles.deckTitle}>Q4 Roadmap</Text>
-                  <Text style={styles.deckSub}>Design systems, communities & calling</Text>
-                  <View style={styles.deckCards}>
-                    {[
-                      { label: 'Design system', value: '86%', tint: '#00a884' },
-                      { label: 'Community', value: '64%', tint: '#5b6cff' },
-                      { label: 'Calling', value: '72%', tint: '#f2994a' },
-                    ].map((item) => (
-                      <View key={item.label} style={styles.deckCard}>
-                        <Text style={styles.deckCardLabel}>{item.label}</Text>
-                        <Text style={styles.deckCardValue}>{item.value}</Text>
-                        <View style={styles.deckTrack}>
-                          <View
-                            style={[
-                              styles.deckFill,
-                              { width: item.value as `${number}%`, backgroundColor: item.tint },
-                            ]}
-                          />
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                  <View style={styles.deckFooterRow}>
-                    <Text style={styles.deckFooter}>Shared from your screen</Text>
-                    <View style={styles.deckPresenter}>
-                      <MonitorUp color="#00a884" size={13} />
-                      <Text style={styles.deckPresenterText}>You are presenting</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-
+              <View style={styles.sharedWindow} ref={shareRef} />
               <View style={styles.shareStrip}>
-                {[selfTile, ...remotes.map((participant, index) => remoteTile(participant, index))]}
-              </View>
-            </View>
-          ) : isGroup ? (
-            <View style={styles.gridWrap}>
-              <View style={styles.grid}>
-                {remotes.map((participant, index) => remoteTile(participant, index))}
-                {selfTile}
+                <View style={styles.selfChip}>
+                  <Avatar name="You" size={34} />
+                  <Text style={styles.selfChipText}>You are presenting</Text>
+                </View>
               </View>
             </View>
           ) : (
             <View style={styles.center}>
               <View style={styles.remoteStage}>
-                {type === 'video' && !compact ? (
-                  <LinearGradient
-                    colors={['#1f3f43', '#0c181c']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                  />
-                ) : null}
-                <View style={styles.avatarHalo}>
-                  <View style={styles.avatarHaloInner}>
-                    <Avatar name={remotes[0].name} uri={remotes[0].avatar} size={compact ? 96 : 128} />
+                <LinearGradient
+                  colors={['#1f3f43', '#0c181c']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
+                <Pulse min={1} max={1.06} duration={connected ? 2200 : 900}>
+                  <View style={styles.avatarHalo}>
+                    <View style={styles.avatarHaloInner}>
+                      <Avatar name={peerName} uri={peerAvatar} size={compact ? 96 : 128} />
+                    </View>
                   </View>
-                  {connected ? <View style={styles.liveRing} /> : null}
-                </View>
+                </Pulse>
+                {connected ? <View style={styles.liveRing} /> : null}
               </View>
-              <Text style={styles.name}>{remotes[0].name}</Text>
-              <Text style={styles.status}>{connected ? formatCallTime(seconds) : 'Calling…'}</Text>
-              <Text style={styles.ringing}>
-                {connected
-                  ? type === 'video'
-                    ? 'Video connected · encrypted'
-                    : 'Connected · encrypted'
-                  : 'Ringing on WhatsApp'}
-              </Text>
-              {type === 'video' && cameraReady ? (
+              <Text style={styles.name}>{peerName}</Text>
+              <Text style={styles.status}>{statusLabel}</Text>
+              <Text style={styles.ringing}>{hintLabel}</Text>
+              {call.type === 'video' && cameraReady ? (
                 <View style={styles.pip}>
                   <CameraView style={StyleSheet.absoluteFill} facing="front" />
                   <View style={styles.pipTag}>
@@ -341,23 +249,17 @@ export function CallOverlay({
                 </Pressable>
               </View>
               <View style={styles.personRow}>
-                <Avatar name="You" size={32} />
+                <Avatar name={currentUser?.name ?? 'You'} size={32} />
                 <Text style={styles.personName}>You</Text>
                 {muted ? <MicOff color="#ff7b72" size={14} /> : <Mic color="#00a884" size={14} />}
               </View>
-              {remotes.map((participant) => (
-                <View key={participant.id} style={styles.personRow}>
-                  <Avatar name={participant.name} uri={participant.avatar} size={32} />
-                  <Text style={styles.personName} numberOfLines={1}>
-                    {participant.name}
-                  </Text>
-                  {participant.muted ? (
-                    <MicOff color="#ff7b72" size={14} />
-                  ) : (
-                    <Mic color="#00a884" size={14} />
-                  )}
-                </View>
-              ))}
+              <View style={styles.personRow}>
+                <Avatar name={peerName} uri={peerAvatar} size={32} />
+                <Text style={styles.personName} numberOfLines={1}>
+                  {peerName}
+                </Text>
+                <Mic color="#00a884" size={14} />
+              </View>
             </View>
           ) : null}
 
@@ -378,7 +280,7 @@ export function CallOverlay({
               icon={screenSharing ? ScreenShareOff : ScreenShare}
               label={screenSharing ? 'Stop share' : 'Share'}
               active={screenSharing}
-              onPress={() => setScreenSharing((value) => !value)}
+              onPress={() => void toggleScreenShare()}
             />
             <ControlButton
               icon={speaker ? Volume2 : VolumeX}
@@ -388,7 +290,7 @@ export function CallOverlay({
             />
             <ControlButton
               icon={Users}
-              label={`${remotes.length + 1} people`}
+              label="People"
               active={showPeople}
               onPress={() => setShowPeople((value) => !value)}
             />
@@ -404,6 +306,68 @@ export function CallOverlay({
               <PhoneOff color="#ffffff" size={26} />
             </Pressable>
             <Text style={styles.endLabel}>End call</Text>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
+    </Modal>
+  );
+}
+
+export function IncomingCallOverlay({
+  call,
+  onAccept,
+  onDecline,
+}: {
+  call: CallSession;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  useEffect(() => {
+    void startRingtone();
+    return () => {
+      stopRingtone();
+    };
+  }, []);
+
+  return (
+    <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={onDecline}>
+      <LinearGradient colors={['#0f3d34', '#0b141a']} style={styles.root}>
+        <SafeAreaView style={styles.incomingSafe} edges={['top', 'bottom']}>
+          <View style={styles.incomingTop}>
+            <Text style={styles.incomingLabel}>
+              Incoming {call.type === 'video' ? 'video' : 'voice'} call
+            </Text>
+            <Text style={styles.incomingFrom}>{call.callerName}</Text>
+            <Text style={styles.incomingHint}>wants to connect with you</Text>
+          </View>
+
+          <Pulse min={1} max={1.08} duration={1100}>
+            <View style={styles.incomingAvatar}>
+              <Avatar name={call.callerName} uri={call.callerAvatar} size={128} />
+            </View>
+          </Pulse>
+
+          <View style={styles.incomingActions}>
+            <View style={styles.incomingActionWrap}>
+              <Pressable
+                onPress={onDecline}
+                style={({ pressed }) => [styles.declineButton, pressed && { opacity: 0.8 }]}
+                accessibilityLabel="Decline call"
+              >
+                <PhoneOff color="#ffffff" size={28} />
+              </Pressable>
+              <Text style={styles.incomingActionText}>Decline</Text>
+            </View>
+            <View style={styles.incomingActionWrap}>
+              <Pressable
+                onPress={onAccept}
+                style={({ pressed }) => [styles.acceptButton, pressed && { opacity: 0.8 }]}
+                accessibilityLabel="Accept call"
+              >
+                <PhoneIncoming color="#ffffff" size={28} />
+              </Pressable>
+              <Text style={styles.incomingActionText}>Accept</Text>
+            </View>
           </View>
         </SafeAreaView>
       </LinearGradient>
@@ -442,23 +406,15 @@ function ControlButton({
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
-  safe: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
+  root: { flex: 1 },
+  safe: { flex: 1, paddingHorizontal: 20, paddingVertical: 16 },
   top: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12,
   },
-  topLeft: {
-    gap: 6,
-  },
+  topLeft: { gap: 6 },
   securePill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -469,17 +425,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
-  secureDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#00a884',
-  },
-  secureText: {
-    color: 'rgba(255,255,255,0.78)',
-    fontSize: 9,
-    fontWeight: '600',
-  },
+  secureDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#00a884' },
+  secureText: { color: 'rgba(255,255,255,0.78)', fontSize: 9, fontWeight: '600' },
   callType: {
     color: 'rgba(255,255,255,0.58)',
     fontSize: 10.5,
@@ -494,11 +441,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   remoteStage: {
     width: '100%',
     maxWidth: 620,
@@ -550,11 +493,7 @@ const styles = StyleSheet.create({
     marginTop: 7,
     letterSpacing: 0.2,
   },
-  ringing: {
-    color: 'rgba(255,255,255,0.48)',
-    fontSize: 11,
-    marginTop: 4,
-  },
+  ringing: { color: 'rgba(255,255,255,0.48)', fontSize: 11, marginTop: 4 },
   pip: {
     position: 'absolute',
     right: 6,
@@ -576,251 +515,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  pipTagText: {
-    color: '#ffffff',
-    fontSize: 8.5,
-    fontWeight: '700',
-  },
-  gridWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 14,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
-    width: '100%',
-    maxWidth: 1080,
-    alignSelf: 'center',
-  },
-  tile: {
-    flexBasis: '47%',
-    flexGrow: 1,
-    maxWidth: 520,
-    minHeight: 132,
-    borderRadius: 16,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    backgroundColor: '#0e1c1f',
-  },
-  tileCenter: {
-    alignItems: 'center',
-    gap: 7,
-    paddingBottom: 8,
-  },
-  tileAvatarRing: {
-    padding: 3,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  tileNameSmall: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  tileFooter: {
-    position: 'absolute',
-    left: 8,
-    right: 8,
-    bottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 6,
-  },
-  tileTag: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    maxWidth: '76%',
-  },
-  tileTagText: {
-    color: '#ffffff',
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  tileMic: {
-    width: 21,
-    height: 21,
-    borderRadius: 11,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  speakingBadge: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0,168,132,0.18)',
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  speakingDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#00a884',
-  },
-  speakingText: {
-    color: '#7ef0d0',
-    fontSize: 8,
-    fontWeight: '700',
-  },
-  stage: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 12,
-    gap: 10,
-  },
+  pipTagText: { color: '#ffffff', fontSize: 8.5, fontWeight: '700' },
+  stage: { flex: 1, justifyContent: 'center', paddingVertical: 12, gap: 10 },
   sharedWindow: {
     width: '100%',
     maxWidth: 920,
     alignSelf: 'center',
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#f7f8fa',
+    backgroundColor: '#08131a',
+    borderWidth: 1,
+    borderColor: '#22343d',
     flex: 1,
-    maxHeight: 460,
+    maxHeight: 520,
   },
-  windowBar: {
+  shareStrip: { flexDirection: 'row', justifyContent: 'center' },
+  selfChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#e9edef',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  windowDots: {
-    flexDirection: 'row',
-    gap: 5,
-  },
-  windowDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  windowTitle: {
-    flex: 1,
-    color: '#54656f',
-    fontSize: 9.5,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  liveSharePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#d9fdd3',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
-  liveShareDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#00a884',
-  },
-  liveShareText: {
-    color: '#008069',
-    fontSize: 6.5,
-    fontWeight: '900',
-    letterSpacing: 0.4,
-  },
-  deck: {
-    flex: 1,
-    padding: 18,
-    backgroundColor: '#ffffff',
-    gap: 6,
-  },
-  deckEyebrow: {
-    color: '#00a884',
-    fontSize: 7.5,
-    fontWeight: '900',
-    letterSpacing: 1.1,
-  },
-  deckTitle: {
-    color: '#111b21',
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: -0.7,
-  },
-  deckSub: {
-    color: '#667781',
-    fontSize: 10,
-  },
-  deckCards: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-    flex: 1,
-  },
-  deckCard: {
-    flex: 1,
-    backgroundColor: '#f4f7f8',
-    borderRadius: 9,
-    padding: 10,
-    justifyContent: 'center',
-    gap: 3,
-    minWidth: 0,
-  },
-  deckCardLabel: {
-    color: '#54656f',
-    fontSize: 8,
-    fontWeight: '600',
-  },
-  deckCardValue: {
-    color: '#111b21',
-    fontSize: 19,
-    fontWeight: '800',
-  },
-  deckTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#e2e8ea',
-    overflow: 'hidden',
-  },
-  deckFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  deckFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 2,
-  },
-  deckFooter: {
-    color: '#8696a0',
-    fontSize: 8,
-  },
-  deckPresenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  deckPresenterText: {
-    color: '#008069',
-    fontSize: 8,
-    fontWeight: '700',
-  },
-  shareStrip: {
-    flexDirection: 'row',
-    gap: 8,
-    maxWidth: 920,
-    width: '100%',
-    alignSelf: 'center',
-  },
+  selfChipText: { color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: '600' },
   peoplePanel: {
     position: 'absolute',
     right: 20,
@@ -832,11 +551,6 @@ const styles = StyleSheet.create({
     padding: 11,
     gap: 3,
     zIndex: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 20,
   },
   peopleHeader: {
     flexDirection: 'row',
@@ -844,27 +558,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 7,
   },
-  peopleTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  peopleTitle: {
-    color: '#ffffff',
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  personRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 5,
-  },
-  personName: {
-    flex: 1,
-    color: '#d7dfe3',
-    fontSize: 11,
-  },
+  peopleTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  peopleTitle: { color: '#ffffff', fontSize: 11.5, fontWeight: '700' },
+  personRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5 },
+  personName: { flex: 1, color: '#d7dfe3', fontSize: 11 },
   controls: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -873,11 +570,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     marginTop: 8,
   },
-  controlWrap: {
-    alignItems: 'center',
-    gap: 5,
-    width: 64,
-  },
+  controlWrap: { alignItems: 'center', gap: 5, width: 64 },
   controlButton: {
     width: 50,
     height: 50,
@@ -891,11 +584,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
-  endWrap: {
-    alignItems: 'center',
-    gap: 6,
-    paddingBottom: 6,
-  },
+  endWrap: { alignItems: 'center', gap: 6, paddingBottom: 6 },
   endButton: {
     width: 62,
     height: 62,
@@ -903,15 +592,51 @@ const styles = StyleSheet.create({
     backgroundColor: '#ea4335',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#ea4335',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.38,
-    shadowRadius: 16,
-    elevation: 8,
   },
-  endLabel: {
-    color: 'rgba(255,255,255,0.65)',
-    fontSize: 10,
-    fontWeight: '500',
+  endLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: '500' },
+  incomingSafe: { flex: 1, alignItems: 'center', justifyContent: 'space-between', padding: 28 },
+  incomingTop: { alignItems: 'center', gap: 6, marginTop: 24 },
+  incomingLabel: {
+    color: '#7ef0d0',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
   },
+  incomingFrom: {
+    color: '#ffffff',
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  incomingHint: { color: 'rgba(255,255,255,0.55)', fontSize: 12 },
+  incomingAvatar: {
+    width: 196,
+    height: 196,
+    borderRadius: 98,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,168,132,0.16)',
+  },
+  incomingActions: { flexDirection: 'row', gap: 64, marginBottom: 20 },
+  incomingActionWrap: { alignItems: 'center', gap: 8 },
+  declineButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#ea4335',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  acceptButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#00a884',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  incomingActionText: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '600' },
 });

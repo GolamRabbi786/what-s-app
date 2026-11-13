@@ -3,7 +3,6 @@ import {
   ArrowRight,
   Bell,
   BellOff,
-  Check,
   ChevronDown,
   ChevronRight,
   Globe,
@@ -18,7 +17,6 @@ import {
 } from 'lucide-react-native';
 import React, { useMemo, useState } from 'react';
 import {
-  ImageBackground,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -29,6 +27,7 @@ import {
 } from 'react-native';
 import { AppShell } from '../../components/AppShell';
 import { Avatar } from '../../components/Avatar';
+import { FadeSlideIn } from '../../components/Motion';
 import { Sheet } from '../../components/Sheet';
 import { useApp } from '../../context/AppContext';
 import { Community } from '../../lib/types';
@@ -41,32 +40,7 @@ export default function CommunitiesScreen() {
   );
 }
 
-const EXPLORE = [
-  {
-    id: 'photography',
-    name: 'Street Photography',
-    category: 'Photography',
-    members: '12.4k members',
-    image:
-      'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg?auto=compress&cs=tinysrgb&w=900',
-  },
-  {
-    id: 'travel',
-    name: 'Weekend Wanderers',
-    category: 'Travel',
-    members: '8.1k members',
-    image:
-      'https://images.pexels.com/photos/346885/pexels-photo-346885.jpeg?auto=compress&cs=tinysrgb&w=900',
-  },
-  {
-    id: 'technology',
-    name: 'Builders & Makers',
-    category: 'Technology',
-    members: '21.7k members',
-    image:
-      'https://images.pexels.com/photos/1714208/pexels-photo-1714208.jpeg?auto=compress&cs=tinysrgb&w=900',
-  },
-];
+
 
 function CommunitiesHome() {
   const { theme, state, createCommunity } = useApp();
@@ -78,7 +52,6 @@ function CommunitiesHome() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [mutedIds, setMutedIds] = useState<string[]>([]);
-  const [joinedExplore, setJoinedExplore] = useState<string[]>([]);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -245,17 +218,18 @@ function CommunitiesHome() {
             </View>
           ) : (
             <View style={styles.communityGrid}>
-              {filtered.map((community) => (
-                <CommunityCard
-                  key={community.id}
-                  community={community}
-                  wide={wide}
-                  muted={mutedIds.includes(community.id)}
-                  onPress={() => {
-                    setExpandedGroup(null);
-                    setSelectedId(community.id);
-                  }}
-                />
+              {filtered.map((community, index) => (
+                <FadeSlideIn key={community.id} delay={Math.min(index, 8) * 45} offset={18}>
+                  <CommunityCard
+                    community={community}
+                    wide={wide}
+                    muted={mutedIds.includes(community.id)}
+                    onPress={() => {
+                      setExpandedGroup(null);
+                      setSelectedId(community.id);
+                    }}
+                  />
+                </FadeSlideIn>
               ))}
               {!search ? (
                 <Pressable
@@ -285,71 +259,6 @@ function CommunitiesHome() {
               ) : null}
             </View>
           )}
-
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Explore communities</Text>
-            <Text style={[styles.sectionHint, { color: theme.textSecondary }]}>
-              Find your people
-            </Text>
-          </View>
-
-          <View style={styles.exploreGrid}>
-            {EXPLORE.map((item) => {
-              const joined = joinedExplore.includes(item.id);
-              return (
-                <ImageBackground
-                  key={item.id}
-                  source={{ uri: item.image }}
-                  style={[styles.exploreCard, { width: wide ? '31.9%' : '100%' }]}
-                  imageStyle={styles.exploreImage}
-                >
-                  <LinearGradient
-                    colors={['rgba(11,20,26,0.05)', 'rgba(11,20,26,0.85)']}
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <View style={styles.exploreTop}>
-                    <View style={styles.exploreCategory}>
-                      <Text style={styles.exploreCategoryText}>{item.category}</Text>
-                    </View>
-                    <Pressable
-                      onPress={() =>
-                        setJoinedExplore((current) =>
-                          current.includes(item.id)
-                            ? current.filter((value) => value !== item.id)
-                            : [...current, item.id],
-                        )
-                      }
-                      style={[
-                        styles.joinButton,
-                        { backgroundColor: joined ? '#00a884' : 'rgba(255,255,255,0.92)' },
-                      ]}
-                    >
-                      {joined ? (
-                        <Check color="#ffffff" size={13} />
-                      ) : (
-                        <UserPlus color="#075e54" size={13} />
-                      )}
-                      <Text
-                        style={[
-                          styles.joinButtonText,
-                          { color: joined ? '#ffffff' : '#075e54' },
-                        ]}
-                      >
-                        {joined ? 'Joined' : 'Join'}
-                      </Text>
-                    </Pressable>
-                  </View>
-                  <View style={styles.exploreBottom}>
-                    <Text style={styles.exploreName}>{item.name}</Text>
-                    <View style={styles.exploreMeta}>
-                      <Globe color="rgba(255,255,255,0.75)" size={12} />
-                      <Text style={styles.exploreMembers}>{item.members}</Text>
-                    </View>
-                  </View>
-                </ImageBackground>
-              );
-            })}
-          </View>
 
           <View style={[styles.footerNote, { borderTopColor: theme.border }]}>
             <Lock color={theme.textMuted} size={14} />

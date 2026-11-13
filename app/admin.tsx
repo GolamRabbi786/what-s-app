@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDashed,
+  Copy,
+  Download,
   Eye,
   EyeOff,
   Globe2,
@@ -27,6 +29,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Smartphone,
   Sun,
   Trash2,
   UserCheck,
@@ -34,8 +37,10 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -50,11 +55,31 @@ import { FadeSlideIn } from '../components/Motion';
 import { Sheet } from '../components/Sheet';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { apiRequest } from '../lib/client';
 import { COUNTRIES } from '../lib/countries';
 import { formatListDate, truncate } from '../lib/format';
-import { Account, Broadcast } from '../lib/types';
+import {
+  Account,
+  AdminContent,
+  AdminStats,
+  Broadcast,
+} from '../lib/types';
 
 type Section = 'overview' | 'users' | 'content' | 'calls' | 'broadcast' | 'settings';
+
+interface ApkInfo {
+  available: boolean;
+  size: number | null;
+  updatedAt: string | null;
+  url: string | null;
+  buildCommand: string;
+}
+
+function formatBytes(value: number | null) {
+  if (!value) return null;
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(value / 1024))} KB`;
+}
 
 const NAV: {
   key: Section;
@@ -69,8 +94,7 @@ const NAV: {
   { key: 'settings', label: 'Admin settings', icon: Settings },
 ];
 
-const SECTION_TITLES: Record<Section, { title: string; subtitle: string }> = {
-  overview: {
+const SECTION_TITLES: Record<Section, { title: string; subtitle: string }> = {  overview: {
     title: 'Platform overview',
     subtitle: 'A live view of accounts, conversations and activity',
   },
@@ -98,18 +122,7 @@ const SECTION_TITLES: Record<Section, { title: string; subtitle: string }> = {
 
 export default function AdminScreen() {
   const router = useRouter();
-  const {
-    theme,
-    state,
-    setTheme,
-    toggleTheme,
-    deleteChat,
-    clearChatMessages,
-    deleteStatusGroup,
-    deleteCommunity,
-    clearCalls,
-    updateCommunityAnnouncement,
-  } = useApp();
+  const { theme, setTheme, toggleTheme } = useApp();
   const {
     currentUser,
     accounts,
@@ -148,6 +161,103 @@ export default function AdminScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
 
+  const [platformStats, setPlatformStats] = useState<AdminStats | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [platformContent, setPlatformContent] = useState<AdminContent | null>(null);
+  const [contentError, setContentError] = useState<string | null>(null);
+  const [contentLoading, setContentLoading] = useState(true);
+  const [apkInfo, setApkInfo] = useState<ApkInfo | null>(null);
+  const [apkLoading, setApkLoading] = useState(true);
+  const [apkError, setApkError] = useState<string | null>(null);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const result = await apiRequest<{ stats: AdminStats }>('/api/admin/stats');
+      setPlatformStats(result.stats);
+      setStatsError(null);
+    } catch (error) {
+      setStatsError(
+        error instanceof Error ? error.message : 'Unable to load platform statistics.',
+      );
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats, accounts.length]);
+
+  useEffect(() => {
+    const timer = setInterval(() => void loadStats(), 30000);
+    return () => clearInterval(timer);
+  }, [loadStats]);
+
+  const loadContent = useCallback(async () => {
+    try {
+      const result = await apiRequest<{ content: AdminContent }>('/api/admin/content');
+      setPlatformContent(result.content);
+      setContentError(null);
+    } catch (error) {
+      setContentError(
+        error instanceof Error ? error.message : 'Unable to load platform content.',
+      );
+    } finally {
+      setContentLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadContent();
+  }, [loadContent]);
+
+  const loadApkInfo = useCallback(async () => {
+    setApkLoading(true);
+    try {
+      const result = await apiRequest<ApkInfo>('/api/download/apk?info=1');
+      setApkInfo(result);
+      setApkError(null);
+    } catch (error) {
+      setApkError(
+        error instanceof Error ? error.message : 'Unable to check the APK download.',
+      );
+    } finally {
+      setApkLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadApkInfo();
+  }, [loadApkInfo]);
+
+  const openApkDownload = () => {
+    const target = apkInfo?.url ?? '/api/download/apk';
+    const absolute = /^https?:\/\//i.test(target)
+      ? target
+      : `${typeof window !== 'undefined' && window.location?.origin ? window.location.origin : ''}${target}`;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.open(absolute, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    void Linking.openURL(absolute).catch(() => undefined);
+  };
+
+  const copyApkLink = () => {
+    const origin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : '';
+    const link = `${origin}${apkInfo?.url ?? '/api/download/apk'}`;
+    const nav = (globalThis as unknown as {
+      navigator?: { clipboard?: { writeText?: (value: string) => Promise<void> } };
+    }).navigator;
+    void nav?.clipboard
+      ?.writeText?.(link)
+      .then(() => notify('ok', 'APK download link copied to the clipboard.'))
+      .catch(() => notify('error', 'Unable to copy the link on this device.'));
+  };
+
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 4200);
@@ -160,31 +270,23 @@ export default function AdminScreen() {
   );
 
   const stats = useMemo(() => {
-    const totalMessages = Object.values(state.messages).reduce(
-      (sum, list) => sum + list.length,
-      0,
-    );
-    const unread = state.chats.reduce((sum, chat) => sum + chat.unread, 0);
-    const active = members.filter((account) => account.status === 'active').length;
-    const suspended = members.filter((account) => account.status === 'suspended').length;
-    const verified = members.filter((account) => account.verified).length;
-    const countries = new Set(members.map((account) => account.countryName)).size;
+    const base = platformStats;
     return {
-      totalUsers: members.length,
-      active,
-      suspended,
-      verified,
-      admins: accounts.filter((account) => account.role === 'admin').length,
-      chats: state.chats.length,
-      groups: state.chats.filter((chat) => chat.group).length,
-      messages: totalMessages,
-      unread,
-      calls: state.calls.length,
-      statuses: state.statuses.length,
-      communities: state.communities.length,
-      countries,
+      totalUsers: base?.totalUsers ?? 0,
+      active: base?.active ?? 0,
+      suspended: base?.suspended ?? 0,
+      verified: base?.verified ?? 0,
+      admins: base?.admins ?? 0,
+      countries: base?.countries ?? 0,
+      chats: base?.chats ?? 0,
+      groups: base?.groups ?? 0,
+      messages: base?.messages ?? 0,
+      calls: base?.calls ?? 0,
+      statuses: base?.statuses ?? 0,
+      communities: base?.communities ?? 0,
+      updatedAt: base?.updatedAt ?? null,
     };
-  }, [accounts, members, state]);
+  }, [platformStats]);
 
   const recentUsers = useMemo(
     () =>
@@ -220,6 +322,28 @@ export default function AdminScreen() {
   };
 
   const notify = (tone: 'ok' | 'error', text: string) => setToast({ tone, text });
+
+  const chats = platformContent?.chats ?? [];
+  const statusGroups = platformContent?.statusGroups ?? [];
+  const platformCommunities = platformContent?.communities ?? [];
+  const calls = platformContent?.calls ?? [];
+
+  const moderate = async (body: Record<string, unknown>, message: string) => {
+    try {
+      const result = await apiRequest<{ ok: boolean; content: AdminContent }>(
+        '/api/admin/content',
+        { method: 'POST', body: JSON.stringify(body) },
+      );
+      setPlatformContent(result.content);
+      setContentError(null);
+      notify('ok', message);
+    } catch (error) {
+      notify(
+        'error',
+        error instanceof Error ? error.message : 'Moderation action failed.',
+      );
+    }
+  };
 
   const submitBroadcast = async () => {
     const result = await sendBroadcast({
@@ -315,11 +439,22 @@ export default function AdminScreen() {
     if (section === 'overview') {
       return (
         <View style={styles.stack}>
+          {statsError ? (
+            <Pressable
+              onPress={() => void loadStats()}
+              style={[styles.statsBanner, { backgroundColor: theme.chip, borderColor: theme.border }]}
+            >
+              <Activity color={theme.danger} size={16} />
+              <Text style={[styles.statsBannerText, { color: theme.textSecondary }]}>
+                {statsError} Tap to retry.
+              </Text>
+            </Pressable>
+          ) : null}
           <View style={styles.statGrid}>
             <StatCard
               icon={Users}
               label="Total members"
-              value={String(stats.totalUsers)}
+              value={statsLoading && !platformStats ? '—' : String(stats.totalUsers)}
               detail={`${stats.admins} administrator${stats.admins === 1 ? '' : 's'}`}
               tint="#00a884"
               theme={theme}
@@ -352,7 +487,7 @@ export default function AdminScreen() {
               icon={MessageCircle}
               label="Chats"
               value={String(stats.chats)}
-              detail={`${stats.groups} groups · ${stats.unread} unread`}
+              detail={`${stats.groups} groups across the platform`}
               tint="#00a884"
               theme={theme}
             />
@@ -497,6 +632,12 @@ export default function AdminScreen() {
                     onPress={() => router.push('/(tabs)' as never)}
                     theme={theme}
                   />
+                  <QuickAction
+                    icon={Download}
+                    label="Get the APK"
+                    onPress={() => setSection('settings')}
+                    theme={theme}
+                  />
                 </View>
               </Panel>
             </View>
@@ -628,23 +769,56 @@ export default function AdminScreen() {
     if (section === 'content') {
       return (
         <View style={styles.stack}>
+          {contentError ? (
+            <Pressable
+              onPress={() => void loadContent()}
+              style={[
+                styles.statsBanner,
+                { backgroundColor: theme.chip, borderColor: theme.border },
+              ]}
+            >
+              <Activity color={theme.danger} size={16} />
+              <Text style={[styles.statsBannerText, { color: theme.textSecondary }]}>
+                {contentError} Tap to retry.
+              </Text>
+            </Pressable>
+          ) : null}
+
           <Panel
             title="Conversations"
-            subtitle={`${state.chats.length} chats · ${stats.messages} messages`}
+            subtitle={
+              contentLoading && !platformContent
+                ? 'Loading platform conversations…'
+                : `${chats.length} chats · ${stats.messages} messages`
+            }
             theme={theme}
           >
-            {state.chats.map((chat) => {
-              const count = state.messages[chat.id]?.length ?? 0;
-              return (
-                <View key={chat.id} style={[styles.contentRow, { borderBottomColor: theme.border }]}>
-                  <Avatar name={chat.name} uri={chat.avatar} size={38} group={chat.group} />
+            {chats.length === 0 ? (
+              <EmptyState
+                icon={MessageCircle}
+                title="No conversations yet"
+                detail="Chats created by members will appear here for moderation."
+                theme={theme}
+              />
+            ) : (
+              chats.map((chat) => (
+                <View
+                  key={chat.id}
+                  style={[styles.contentRow, { borderBottomColor: theme.border }]}
+                >
+                  <Avatar
+                    name={chat.name}
+                    uri={chat.avatar}
+                    size={38}
+                    group={chat.kind === 'group'}
+                  />
                   <View style={styles.contentText}>
                     <Text style={[styles.contentName, { color: theme.text }]} numberOfLines={1}>
                       {chat.name}
                     </Text>
                     <Text style={[styles.contentMeta, { color: theme.textSecondary }]}>
-                      {chat.group ? 'Group' : 'Direct'} · {count} messages ·{' '}
-                      {chat.unread} unread
+                      {chat.kind === 'group' ? 'Group' : 'Direct'} · {chat.members} member
+                      {chat.members === 1 ? '' : 's'} · {chat.messages} messages
                     </Text>
                   </View>
                   <View style={styles.rowActions}>
@@ -654,9 +828,11 @@ export default function AdminScreen() {
                           title: 'Clear messages',
                           message: `Delete all messages in “${chat.name}”? The chat itself stays.`,
                           action: () => {
-                            clearChatMessages(chat.id);
                             setConfirm(null);
-                            notify('ok', `Messages cleared in “${chat.name}”.`);
+                            void moderate(
+                              { action: 'clear_chat_messages', id: chat.id },
+                              `Messages cleared in “${chat.name}”.`,
+                            );
                           },
                         })
                       }
@@ -677,9 +853,11 @@ export default function AdminScreen() {
                           title: 'Delete chat',
                           message: `Remove “${chat.name}” and all of its messages?`,
                           action: () => {
-                            deleteChat(chat.id);
                             setConfirm(null);
-                            notify('ok', `Chat “${chat.name}” deleted.`);
+                            void moderate(
+                              { action: 'delete_chat', id: chat.id },
+                              `Chat “${chat.name}” deleted.`,
+                            );
                           },
                         })
                       }
@@ -694,111 +872,150 @@ export default function AdminScreen() {
                     </Pressable>
                   </View>
                 </View>
-              );
-            })}
+              ))
+            )}
           </Panel>
 
           <View style={styles.twoColumn}>
             <Panel
               title="Status updates"
-              subtitle={`${stats.statuses} active status groups`}
+              subtitle={`${statusGroups.length} active status groups`}
               theme={theme}
             >
-              {state.statuses.map((status) => (
-                <View key={status.id} style={[styles.contentRow, { borderBottomColor: theme.border }]}>
-                  <Avatar name={status.name} uri={status.avatar} size={36} />
-                  <View style={styles.contentText}>
-                    <Text style={[styles.contentName, { color: theme.text }]} numberOfLines={1}>
-                      {status.name}
-                    </Text>
-                    <Text style={[styles.contentMeta, { color: theme.textSecondary }]}>
-                      {status.items.length} update{status.items.length === 1 ? '' : 's'} ·{' '}
-                      {truncate(status.time, 22)}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() =>
-                      setConfirm({
-                        title: 'Delete status',
-                        message: `Remove all status updates from ${status.name}?`,
-                        action: () => {
-                          deleteStatusGroup(status.id);
-                          setConfirm(null);
-                          notify('ok', 'Status updates removed.');
-                        },
-                      })
-                    }
-                    style={({ pressed }) => [
-                      styles.iconAction,
-                      { backgroundColor: theme.chip },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Trash2 color={theme.danger} size={15} />
-                  </Pressable>
-                </View>
-              ))}
+              {statusGroups.length === 0 ? (
+                <EmptyState
+                  icon={CircleDashed}
+                  title="No active statuses"
+                  detail="Status updates disappear after 24 hours."
+                  theme={theme}
+                />
+              ) : (
+                statusGroups.map((status) => {
+                  const latest = status.items[0];
+                  return (
+                    <View
+                      key={status.id}
+                      style={[styles.contentRow, { borderBottomColor: theme.border }]}
+                    >
+                      <Avatar name={status.name} uri={status.avatar} size={36} />
+                      <View style={styles.contentText}>
+                        <Text
+                          style={[styles.contentName, { color: theme.text }]}
+                          numberOfLines={1}
+                        >
+                          {status.name}
+                        </Text>
+                        <Text style={[styles.contentMeta, { color: theme.textSecondary }]}>
+                          {status.items.length} update{status.items.length === 1 ? '' : 's'}
+                          {latest ? ` · ${formatListDate(latest.createdAt)}` : ''}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() =>
+                          setConfirm({
+                            title: 'Delete status',
+                            message: `Remove all status updates from ${status.name}?`,
+                            action: () => {
+                              setConfirm(null);
+                              void moderate(
+                                { action: 'delete_status_user', id: status.id },
+                                'Status updates removed.',
+                              );
+                            },
+                          })
+                        }
+                        style={({ pressed }) => [
+                          styles.iconAction,
+                          { backgroundColor: theme.chip },
+                          pressed && { opacity: 0.7 },
+                        ]}
+                      >
+                        <Trash2 color={theme.danger} size={15} />
+                      </Pressable>
+                    </View>
+                  );
+                })
+              )}
             </Panel>
 
             <Panel
               title="Communities"
-              subtitle={`${stats.communities} communities`}
+              subtitle={`${platformCommunities.length} communities`}
               theme={theme}
             >
-              {state.communities.map((community) => (
-                <View
-                  key={community.id}
-                  style={[styles.communityRow, { borderBottomColor: theme.border }]}
-                >
-                  <Avatar name={community.name} uri={community.avatar} size={36} group />
-                  <View style={styles.contentText}>
-                    <Text style={[styles.contentName, { color: theme.text }]} numberOfLines={1}>
-                      {community.name}
-                    </Text>
-                    <Text style={[styles.contentMeta, { color: theme.textSecondary }]}>
-                      {community.members} members · {community.groups.length} groups
-                    </Text>
-                    <Text
-                      style={[styles.communityAnnouncement, { color: theme.textMuted }]}
-                      numberOfLines={2}
-                    >
-                      {community.announcement}
-                    </Text>
+              {platformCommunities.length === 0 ? (
+                <EmptyState
+                  icon={Users}
+                  title="No communities yet"
+                  detail="Communities created by members will appear here."
+                  theme={theme}
+                />
+              ) : (
+                platformCommunities.map((community) => (
+                  <View
+                    key={community.id}
+                    style={[styles.communityRow, { borderBottomColor: theme.border }]}
+                  >
+                    <Avatar name={community.name} uri={community.avatar} size={36} group />
+                    <View style={styles.contentText}>
+                      <Text
+                        style={[styles.contentName, { color: theme.text }]}
+                        numberOfLines={1}
+                      >
+                        {community.name}
+                      </Text>
+                      <Text style={[styles.contentMeta, { color: theme.textSecondary }]}>
+                        {community.members} members · {community.groups} groups
+                      </Text>
+                      <Text
+                        style={[styles.communityAnnouncement, { color: theme.textMuted }]}
+                        numberOfLines={2}
+                      >
+                        {community.announcement}
+                      </Text>
+                    </View>
+                    <View style={styles.rowActions}>
+                      <Pressable
+                        onPress={() =>
+                          setAnnouncement({
+                            id: community.id,
+                            value: community.announcement,
+                          })
+                        }
+                        style={({ pressed }) => [
+                          styles.iconAction,
+                          { backgroundColor: theme.chip },
+                          pressed && { opacity: 0.7 },
+                        ]}
+                      >
+                        <Megaphone color={theme.textSecondary} size={15} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() =>
+                          setConfirm({
+                            title: 'Delete community',
+                            message: `Remove “${community.name}” from the platform?`,
+                            action: () => {
+                              setConfirm(null);
+                              void moderate(
+                                { action: 'delete_community', id: community.id },
+                                'Community deleted.',
+                              );
+                            },
+                          })
+                        }
+                        style={({ pressed }) => [
+                          styles.iconAction,
+                          { backgroundColor: theme.chip },
+                          pressed && { opacity: 0.7 },
+                        ]}
+                      >
+                        <Trash2 color={theme.danger} size={15} />
+                      </Pressable>
+                    </View>
                   </View>
-                  <View style={styles.rowActions}>
-                    <Pressable
-                      onPress={() => setAnnouncement({ id: community.id, value: community.announcement })}
-                      style={({ pressed }) => [
-                        styles.iconAction,
-                        { backgroundColor: theme.chip },
-                        pressed && { opacity: 0.7 },
-                      ]}
-                    >
-                      <Megaphone color={theme.textSecondary} size={15} />
-                    </Pressable>
-                    <Pressable
-                      onPress={() =>
-                        setConfirm({
-                          title: 'Delete community',
-                          message: `Remove “${community.name}” from the platform?`,
-                          action: () => {
-                            deleteCommunity(community.id);
-                            setConfirm(null);
-                            notify('ok', 'Community deleted.');
-                          },
-                        })
-                      }
-                      style={({ pressed }) => [
-                        styles.iconAction,
-                        { backgroundColor: theme.chip },
-                        pressed && { opacity: 0.7 },
-                      ]}
-                    >
-                      <Trash2 color={theme.danger} size={15} />
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
+                ))
+              )}
             </Panel>
           </View>
         </View>
@@ -820,7 +1037,7 @@ export default function AdminScreen() {
             <StatCard
               icon={Phone}
               label="Missed"
-              value={String(state.calls.filter((call) => call.direction === 'missed').length)}
+              value={String(calls.filter((call) => call.direction === 'missed').length)}
               detail="needs attention"
               tint="#eb5757"
               theme={theme}
@@ -828,12 +1045,27 @@ export default function AdminScreen() {
             <StatCard
               icon={Activity}
               label="Video calls"
-              value={String(state.calls.filter((call) => call.type === 'video').length)}
-              detail="with screen sharing"
+              value={String(calls.filter((call) => call.type === 'video').length)}
+              detail="voice & video logs"
               tint="#00a884"
               theme={theme}
             />
           </View>
+
+          {contentError ? (
+            <Pressable
+              onPress={() => void loadContent()}
+              style={[
+                styles.statsBanner,
+                { backgroundColor: theme.chip, borderColor: theme.border },
+              ]}
+            >
+              <Activity color={theme.danger} size={16} />
+              <Text style={[styles.statsBannerText, { color: theme.textSecondary }]}>
+                {contentError} Tap to retry.
+              </Text>
+            </Pressable>
+          ) : null}
 
           <Panel
             title="Call history"
@@ -846,9 +1078,8 @@ export default function AdminScreen() {
                     title: 'Clear call history',
                     message: 'Delete the entire call log? This cannot be undone.',
                     action: () => {
-                      clearCalls();
                       setConfirm(null);
-                      notify('ok', 'Call history cleared.');
+                      void moderate({ action: 'clear_calls' }, 'Call history cleared.');
                     },
                   })
                 }
@@ -863,7 +1094,7 @@ export default function AdminScreen() {
               </Pressable>
             }
           >
-            {state.calls.length === 0 ? (
+            {calls.length === 0 ? (
               <EmptyState
                 icon={Phone}
                 title="No calls recorded"
@@ -871,16 +1102,23 @@ export default function AdminScreen() {
                 theme={theme}
               />
             ) : (
-              state.calls.map((call) => (
-                <View key={call.id} style={[styles.contentRow, { borderBottomColor: theme.border }]}>
-                  <Avatar name={call.name} uri={call.avatar} size={38} />
+              calls.map((call) => (
+                <View
+                  key={call.id}
+                  style={[styles.contentRow, { borderBottomColor: theme.border }]}
+                >
+                  <Avatar name={call.name} uri={undefined} size={38} />
                   <View style={styles.contentText}>
-                    <Text style={[styles.contentName, { color: theme.text }]} numberOfLines={1}>
+                    <Text
+                      style={[styles.contentName, { color: theme.text }]}
+                      numberOfLines={1}
+                    >
                       {call.name}
                     </Text>
                     <Text style={[styles.contentMeta, { color: theme.textSecondary }]}>
                       {call.direction} {call.type} call · {formatListDate(call.at)}
                       {call.duration ? ` · ${call.duration}` : ''}
+                      {call.owner ? ` · logged by ${call.owner}` : ''}
                     </Text>
                   </View>
                   <View
@@ -907,7 +1145,7 @@ export default function AdminScreen() {
                         },
                       ]}
                     >
-                      {call.direction}
+                      {call.direction === 'missed' ? 'Missed' : 'Completed'}
                     </Text>
                   </View>
                 </View>
@@ -1141,6 +1379,121 @@ export default function AdminScreen() {
           </Panel>
 
           <View style={styles.stack}>
+            <Panel
+              title="Mobile app"
+              subtitle="Download and install the Android APK"
+              theme={theme}
+            >
+              <View
+                style={[
+                  styles.apkCard,
+                  { backgroundColor: theme.panelAlt, borderColor: theme.border },
+                ]}
+              >
+                <View style={[styles.apkIcon, { backgroundColor: theme.chip }]}>
+                  <Smartphone color={theme.accentDark} size={24} />
+                </View>
+                <View style={styles.apkInfo}>
+                  <Text style={[styles.apkTitle, { color: theme.text }]}>
+                    WhatsApp for Android
+                  </Text>
+                  <Text style={[styles.apkMeta, { color: theme.textSecondary }]}>
+                    {apkLoading
+                      ? 'Checking the latest build…'
+                      : apkInfo?.available
+                        ? `Ready to install${
+                            formatBytes(apkInfo.size) ? ` · ${formatBytes(apkInfo.size)}` : ''
+                          }`
+                        : 'No APK published for this deployment yet'}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.apkPill,
+                    { backgroundColor: apkInfo?.available ? theme.accentSoft : theme.chip },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.apkPillText,
+                      { color: apkInfo?.available ? theme.accentDark : theme.textMuted },
+                    ]}
+                  >
+                    {apkInfo?.available ? 'APK' : 'PENDING'}
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={openApkDownload}
+                disabled={!apkInfo?.available || apkLoading}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  {
+                    backgroundColor: apkInfo?.available ? theme.accent : theme.chip,
+                    marginTop: 12,
+                  },
+                  (pressed || !apkInfo?.available || apkLoading) && { opacity: 0.78 },
+                ]}
+              >
+                <Download
+                  color={apkInfo?.available ? '#ffffff' : theme.textMuted}
+                  size={16}
+                />
+                <Text
+                  style={[
+                    styles.primaryButtonText,
+                    !apkInfo?.available && { color: theme.textMuted },
+                  ]}
+                >
+                  {apkLoading
+                    ? 'Checking build…'
+                    : apkInfo?.available
+                      ? 'Download APK'
+                      : 'APK not built yet'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={copyApkLink}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  { borderColor: theme.border, marginTop: 10 },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Copy color={theme.textSecondary} size={15} />
+                <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
+                  Copy download link
+                </Text>
+              </Pressable>
+
+              {apkError ? (
+                <Pressable
+                  onPress={() => void loadApkInfo()}
+                  style={[styles.infoNote, { backgroundColor: theme.chip }]}
+                >
+                  <Activity color={theme.danger} size={15} />
+                  <Text style={[styles.infoNoteText, { color: theme.textSecondary }]}>
+                    {apkError} Tap to retry.
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <View style={[styles.infoNote, { backgroundColor: theme.chip }]}>
+                <ShieldCheck color={theme.accent} size={15} />
+                <Text style={[styles.infoNoteText, { color: theme.textSecondary }]}>
+                  Anyone can install this APK. Build it with
+                  {' '}
+                  <Text style={{ fontWeight: '700' }}>
+                    {apkInfo?.buildCommand ?? 'eas build -p android --profile preview'}
+                  </Text>
+                  , then place the file at public/downloads/whatsapp.apk (or set APK_URL) to publish
+                  it here.
+                </Text>
+              </View>
+            </Panel>
+
             <Panel title="Security" subtitle="Change the administrator password" theme={theme}>
               {(
                 [
@@ -1501,9 +1854,16 @@ export default function AdminScreen() {
           <Pressable
             onPress={() => {
               if (!announcement) return;
-              updateCommunityAnnouncement(announcement.id, announcement.value.trim());
+              const target = announcement;
               setAnnouncement(null);
-              notify('ok', 'Community announcement updated.');
+              void moderate(
+                {
+                  action: 'set_announcement',
+                  id: target.id,
+                  value: target.value.trim(),
+                },
+                'Community announcement updated.',
+              );
             }}
             style={({ pressed }) => [
               styles.primaryButton,
@@ -2045,6 +2405,20 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
   },
+  statsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  statsBannerText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   statCard: {
     flexGrow: 1,
     flexBasis: 200,
@@ -2440,6 +2814,44 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 10,
     lineHeight: 15,
+  },
+  apkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 11,
+    padding: 11,
+  },
+  apkIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  apkInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  apkTitle: {
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  apkMeta: {
+    fontSize: 10.5,
+    lineHeight: 15,
+  },
+  apkPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  apkPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   broadcastRow: {
     borderRadius: 10,

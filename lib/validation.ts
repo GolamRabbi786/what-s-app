@@ -67,7 +67,7 @@ export const sendMessageSchema = z
     chatId: z.string().min(1),
     text: z.string().max(8000).optional().default(''),
     kind: z.enum(['text', 'image', 'voice', 'document', 'location']).optional().default('text'),
-    image: z.string().max(4000).optional(),
+    image: z.string().max(3_000_000).optional(),
     duration: z.string().max(20).optional(),
     fileName: z.string().max(200).optional(),
     fileSize: z.string().max(40).optional(),
@@ -91,7 +91,7 @@ export const reactionSchema = z.object({
 export const statusCreateSchema = z.object({
   caption: z.string().max(700).default(''),
   background: z.string().max(40).default('#1a6b5c'),
-  image: z.string().max(4000).optional(),
+  image: z.string().max(3_000_000).optional(),
 });
 
 export const statusActionSchema = z.discriminatedUnion('action', [
@@ -130,4 +130,34 @@ export const callCreateSchema = z.object({
 export const pushTokenSchema = z.object({
   token: z.string().min(8).max(400),
   platform: z.enum(['android', 'ios', 'web']).default('android'),
+});
+
+export const adminContentActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('clear_chat_messages'), id: z.string().min(1) }),
+  z.object({ action: z.literal('delete_chat'), id: z.string().min(1) }),
+  z.object({ action: z.literal('delete_status_user'), id: z.string().min(1) }),
+  z.object({ action: z.literal('delete_community'), id: z.string().min(1) }),
+  z.object({ action: z.literal('clear_calls') }),
+  z.object({
+    action: z.literal('set_announcement'),
+    id: z.string().min(1),
+    value: z.string().trim().max(2000),
+  }),
+]);
+
+export const callSignalSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('start'),
+    peerId: z.string().min(1),
+    chatId: z.string().min(1).optional(),
+    type: z.enum(['voice', 'video']),
+  }),
+  z.object({ action: z.literal('accept'), id: z.string().min(1) }),
+  z.object({ action: z.literal('decline'), id: z.string().min(1) }),
+  z.object({ action: z.literal('end'), id: z.string().min(1) }),
+]);
+
+export const typingSchema = z.object({
+  chatId: z.string().min(1),
+  mode: z.enum(['typing', 'recording', 'idle']),
 });

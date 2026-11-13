@@ -22,6 +22,13 @@
       "when": 1794451168601,
       "tag": "0002_groovy_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794592486170,
+      "tag": "0003_fat_otto_octavius",
+      "breakpoints": true
     }
   ]
 }

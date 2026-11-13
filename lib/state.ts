@@ -12,6 +12,7 @@ import {
   messages,
   statusViews,
   statuses,
+  typingStates,
 } from './schema';
 import { initialsFor } from './format';
 import type {
@@ -25,6 +26,7 @@ import type {
   ReplyTo,
   StatusGroup,
   StatusItem,
+  TypingPeer,
 } from './types';
 
 const ONLINE_WINDOW_MS = 3 * 60 * 1000;
@@ -148,6 +150,27 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
           ),
         )
     : [];
+
+  const statusViewerRows = statusIds.length
+    ? await db
+        .select({
+          statusId: statusViews.statusId,
+          name: userTable.name,
+          avatar: userTable.image,
+        })
+        .from(statusViews)
+        .innerJoin(userTable, eq(userTable.id, statusViews.viewerId))
+        .where(inArray(statusViews.statusId, statusIds))
+    : [];
+
+  const viewerMap = new Map<string, { name: string; avatar?: string }[]>();
+  for (const row of statusViewerRows) {
+    const list = viewerMap.get(row.statusId) ?? [];
+    if (!list.some((viewer) => viewer.name === row.name)) {
+      list.push({ name: row.name, avatar: row.avatar ?? undefined });
+    }
+    viewerMap.set(row.statusId, list);
+  }
 
   const callRows = await db
     .select()
@@ -366,6 +389,21 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
     });
   });
 
+  const myStatusGroup = statusGroupsById.get('my-status');
+  if (myStatusGroup) {
+    const seen = new Set<string>();
+    const viewers: { name: string; avatar?: string }[] = [];
+    for (const item of myStatusGroup.items) {
+      for (const viewer of viewerMap.get(item.id) ?? []) {
+        if (!seen.has(viewer.name)) {
+          seen.add(viewer.name);
+          viewers.push(viewer);
+        }
+      }
+    }
+    myStatusGroup.viewers = viewers;
+  }
+
   const resultStatuses = Array.from(statusGroupsById.values()).sort((a, b) => {
     if (a.id === 'my-status') return -1;
     if (b.id === 'my-status') return 1;
@@ -413,6 +451,33 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
     };
   });
 
+  const typingRows = chatIds.length
+    ? await db
+        .select({
+          chatId: typingStates.chatId,
+          userId: typingStates.userId,
+          mode: typingStates.mode,
+          updatedAt: typingStates.updatedAt,
+          name: userTable.name,
+        })
+        .from(typingStates)
+        .innerJoin(userTable, eq(userTable.id, typingStates.userId))
+        .where(
+          and(
+            inArray(typingStates.chatId, chatIds),
+            ne(typingStates.userId, userId),
+            gt(typingStates.updatedAt, new Date(Date.now() - 12000)),
+          ),
+        )
+    : [];
+
+  const typing: TypingPeer[] = typingRows.map((row) => ({
+    chatId: row.chatId,
+    userId: row.userId,
+    name: row.name,
+    mode: row.mode,
+  }));
+
   const contacts = contactRows.map(toContact);
 
   const state: AppState = {
@@ -424,6 +489,7 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
     calls: resultCalls,
     communities: resultCommunities,
     contacts,
+    typing,
     user: toAppUser(me),
   };
 
@@ -436,6 +502,16 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
     callRows.length,
     resultCommunities.length,
     contacts.length,
+    typing.length,
+    typing.reduce(
+      (latest, peer) => {
+        const row = typingRows.find(
+          (entry) => entry.chatId === peer.chatId && entry.userId === peer.userId,
+        );
+        return Math.max(latest, row ? new Date(row.updatedAt).getTime() : 0);
+      },
+      0,
+    ),
     resultChats.reduce((total, chat) => total + chat.unread, 0),
     statusRows.reduce(
       (total, row) => total + new Date(row.status.createdAt).getTime(),
