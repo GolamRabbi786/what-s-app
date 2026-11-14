@@ -1,4 +1,12 @@
 import * as DocumentPicker from 'expo-document-picker';
+import {
+  createAudioPlayer,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import {
@@ -39,6 +47,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -79,6 +88,32 @@ function formatSeconds(value: number) {
   return `0:${String(value).padStart(2, '0')}`;
 }
 
+const MAX_AUDIO_CHARS = 3_000_000;
+
+async function audioToDataUri(uri: string): Promise<string | null> {
+  try {
+    if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const buffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      const chunk = 0x8000;
+      for (let index = 0; index < bytes.length; index += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+      }
+      const base64 = globalThis.btoa(binary);
+      return `data:${blob.type || 'audio/webm'};base64,${base64}`;
+    }
+    const { File } = await import('expo-file-system');
+    const file = new File(uri);
+    const base64 = await file.base64();
+    return `data:audio/mp4;base64,${base64}`;
+  } catch {
+    return null;
+  }
+}
+
 export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const {
     theme,
@@ -112,6 +147,9 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
 
   const listRef = useRef<FlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const playbackRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const playbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messages = state.messages[chat.id] ?? [];
   const chatIsTyping = typing?.chatId === chat.id;
   const effectiveWidth = paneWidth || width;
@@ -126,6 +164,19 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     setSearchQuery('');
     setPlayingId(null);
     setRecording(false);
+    return () => {
+      if (playbackTimer.current) clearTimeout(playbackTimer.current);
+      const player = playbackRef.current;
+      if (player) {
+        try {
+          player.pause();
+          player.remove();
+        } catch {
+          // Player may already be released.
+        }
+        playbackRef.current = null;
+      }
+    };
   }, [chat.id]);
 
   useEffect(() => {
@@ -133,6 +184,16 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     const interval = setInterval(() => setRecordSeconds((value) => value + 1), 1000);
     return () => clearInterval(interval);
   }, [recording]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        if (recorder.isRecording) void recorder.stop();
+      } catch {
+        // Recorder may already be released.
+      }
+    };
+  }, [recorder]);
 
   const filteredMessages = useMemo(() => {
     if (!searchQuery.trim()) return messages;
@@ -227,13 +288,104 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     setActionMessage(null);
   };
 
-  const stopRecording = (discard = false) => {
-    const duration = formatSeconds(Math.max(1, recordSeconds));
+  const stopRecording = async (discard = false) => {
+    const seconds = Math.max(1, recordSeconds);
     setRecording(false);
     setRecordSeconds(0);
     setTypingMode(chat.id, 'idle');
-    if (!discard) {
+
+    let audio: string | null = null;
+    try {
+      if (recorder.isRecording) {
+        await recorder.stop();
+        const uri = recorder.uri;
+        if (uri) audio = await audioToDataUri(uri);
+      }
+    } catch {
+      audio = null;
+    }
+
+    if (discard) return;
+    const duration = formatSeconds(seconds);
+    if (audio && audio.length <= MAX_AUDIO_CHARS) {
+      sendMessage(chat.id, '', { kind: 'voice', duration, image: audio });
+    } else {
       sendMessage(chat.id, '', { kind: 'voice', duration });
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Microphone needed',
+          'Allow microphone access to record and send a voice message.',
+        );
+        return;
+      }
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        interruptionMode: 'mixWithOthers',
+      });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setRecording(true);
+      setRecordSeconds(0);
+      setTypingMode(chat.id, 'recording');
+    } catch (error) {
+      Alert.alert(
+        'Unable to start recording',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    }
+  };
+
+  const toggleVoice = (message: Message) => {
+    if (playbackTimer.current) clearTimeout(playbackTimer.current);
+    const existing = playbackRef.current;
+    if (existing) {
+      try {
+        existing.pause();
+        existing.remove();
+      } catch {
+        // Player may already be released.
+      }
+      playbackRef.current = null;
+    }
+
+    if (playingId === message.id) {
+      setPlayingId(null);
+      return;
+    }
+
+    setPlayingId(message.id);
+    const [minutes, seconds] = (message.duration ?? '0:03').split(':');
+    const length = Math.max(
+      3,
+      Number(minutes ?? 0) * 60 + Number(seconds ?? 3) || 3,
+    );
+
+    if (!message.image) {
+      playbackTimer.current = setTimeout(() => setPlayingId(null), length * 1000);
+      return;
+    }
+
+    try {
+      const player = createAudioPlayer({ uri: message.image });
+      playbackRef.current = player;
+      player.play();
+      playbackTimer.current = setTimeout(() => {
+        try {
+          player.pause();
+        } catch {
+          // ignore
+        }
+        setPlayingId(null);
+      }, length * 1000);
+    } catch {
+      setPlayingId(null);
     }
   };
 
@@ -280,10 +432,35 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
 
       if (result.canceled || !result.assets?.length) return;
       const asset = result.assets[0];
-      const image = asset.base64
-        ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
-        : asset.uri;
+      let image = '';
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          asset.width && asset.width > 1600 ? [{ resize: { width: 1600 } }] : [],
+          {
+            compress: 0.6,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          },
+        );
+        if (manipulated.base64) {
+          image = `data:image/jpeg;base64,${manipulated.base64}`;
+        } else {
+          image = manipulated.uri;
+        }
+      } catch {
+        image = asset.base64
+          ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+          : asset.uri;
+      }
       if (!image) return;
+      if (image.length > 2_900_000) {
+        Alert.alert(
+          'Photo is too large',
+          'Please pick a smaller photo. Very large images cannot be uploaded to this chat.',
+        );
+        return;
+      }
       sendMessage(chat.id, '', { kind: 'image', image });
       setAttachOpen(false);
     } catch (error) {
@@ -309,7 +486,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
         : undefined;
       sendMessage(chat.id, '', {
         kind: 'document',
-        fileName: file.name,
+        fileName: file.name || 'Document',
         fileSize: size,
       });
       setAttachOpen(false);
@@ -426,7 +603,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           {message.kind === 'voice' ? (
             <View style={styles.voiceRow}>
               <Pressable
-                onPress={() => setPlayingId((current) => (current === message.id ? null : message.id))}
+                onPress={() => toggleVoice(message)}
                 style={[styles.voicePlay, { backgroundColor: mine ? '#008069' : theme.accent }]}
               >
                 {playingId === message.id ? (
@@ -577,7 +754,9 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     );
   };
 
-  const lastImages = messages.filter((message) => message.image).slice(-4);
+  const lastImages = messages
+    .filter((message) => message.kind === 'image' && message.image)
+    .slice(-4);
 
   const startCall = (type: 'voice' | 'video') => {
     if (!chat.peerId) {
@@ -843,11 +1022,11 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             <Text style={[styles.recordingText, { color: theme.text }]}>
               Recording {formatSeconds(recordSeconds)}
             </Text>
-            <Pressable onPress={() => stopRecording(true)} style={styles.recordingCancel}>
+            <Pressable onPress={() => void stopRecording(true)} style={styles.recordingCancel}>
               <X color={theme.textSecondary} size={17} />
             </Pressable>
             <Pressable
-              onPress={() => stopRecording(false)}
+              onPress={() => void stopRecording(false)}
               style={[styles.recordingSend, { backgroundColor: theme.accent }]}
             >
               <Send color="#ffffff" size={17} />
@@ -916,9 +1095,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                 accessibilityRole="button"
                 accessibilityLabel="Record voice message"
                 onPress={() => {
-                  setRecording(true);
-                  setRecordSeconds(0);
-                  setTypingMode(chat.id, 'recording');
+                  void startRecording();
                 }}
                 style={({ pressed }) => [
                   styles.sendButton,

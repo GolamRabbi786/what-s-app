@@ -74,7 +74,11 @@ export const sendMessageSchema = z
     replyToId: z.string().max(120).optional(),
   })
   .refine(
-    (value) => value.text.trim().length > 0 || Boolean(value.image) || Boolean(value.fileName),
+    (value) =>
+      value.text.trim().length > 0 ||
+      Boolean(value.image) ||
+      Boolean(value.fileName) ||
+      Boolean(value.duration),
     { message: 'Write a message first.' },
   );
 

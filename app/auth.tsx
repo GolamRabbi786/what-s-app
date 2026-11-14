@@ -633,10 +633,11 @@ export default function AuthScreen() {
                       { icon: Globe2, title: 'Works everywhere', detail: 'Any country, any phone number' },
                       { icon: PhoneCall, title: 'Voice, video & groups', detail: 'Calls and screen sharing built in' },
                       { icon: Users, title: 'Communities & status', detail: 'Stay close to your people' },
-                    ].map((feature) => {
+                    ].map((feature, index) => {
                       const Icon = feature.icon;
                       return (
-                        <View key={feature.title} style={styles.featureRow}>
+                        <FadeSlideIn key={feature.title} delay={140 + index * 90} offset={14}>
+                        <View style={styles.featureRow}>
                           <View style={styles.featureIcon}>
                             <Icon color="#d9fdd3" size={17} />
                           </View>
@@ -645,6 +646,7 @@ export default function AuthScreen() {
                             <Text style={styles.featureDetail}>{feature.detail}</Text>
                           </View>
                         </View>
+                        </FadeSlideIn>
                       );
                     })}
                   </View>
@@ -930,14 +932,49 @@ const styles = StyleSheet.create({
     marginBottom: 22,
     gap: 6,
   },
+  mobileBanner: {
+    alignItems: 'center',
+    borderRadius: 22,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    marginBottom: 18,
+    overflow: 'hidden',
+    gap: 5,
+  },
+  mobileBrandMark: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginBottom: 4,
+  },
+  mobileBannerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  mobileBannerPillText: {
+    color: '#e7fff8',
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
   mobileBrandName: {
     fontSize: 26,
     fontWeight: '800',
     letterSpacing: -0.6,
     marginTop: 4,
+    color: '#ffffff',
   },
   mobileBrandSub: {
     fontSize: 12.5,
+    color: 'rgba(255,255,255,0.78)',
   },
   footerNote: {
     textAlign: 'center',
@@ -966,6 +1003,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 9,
     borderRadius: 9,
+    zIndex: 1,
+  },
+  segmentIndicator: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 4,
+    borderRadius: 9,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 2,
   },
   segmentText: {
     fontSize: 13,
@@ -1014,6 +1063,11 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     paddingHorizontal: 12,
     height: 46,
+  },
+  inputGlow: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 11,
+    borderWidth: 3,
   },
   input: {
     flex: 1,
