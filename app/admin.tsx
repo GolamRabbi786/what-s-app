@@ -517,7 +517,7 @@ export default function AdminScreen() {
             />
           </View>
 
-          <View style={styles.twoColumn}>
+          <View style={desktop ? styles.twoColumn : styles.twoColumnMobile}>
             <Panel title="Recent sign-ups" subtitle="Newest member accounts" theme={theme}>
               {recentUsers.length === 0 ? (
                 <EmptyState
@@ -876,7 +876,7 @@ export default function AdminScreen() {
             )}
           </Panel>
 
-          <View style={styles.twoColumn}>
+          <View style={desktop ? styles.twoColumn : styles.twoColumnMobile}>
             <Panel
               title="Status updates"
               subtitle={`${statusGroups.length} active status groups`}
@@ -1159,7 +1159,7 @@ export default function AdminScreen() {
     if (section === 'broadcast') {
       return (
         <View style={styles.stack}>
-          <View style={styles.twoColumn}>
+          <View style={desktop ? styles.twoColumn : styles.twoColumnMobile}>
             <Panel title="Compose broadcast" subtitle="Delivered to selected accounts" theme={theme}>
               <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>TITLE</Text>
               <TextInput
@@ -1305,7 +1305,7 @@ export default function AdminScreen() {
 
     return (
       <View style={styles.stack}>
-        <View style={styles.twoColumn}>
+        <View style={desktop ? styles.twoColumn : styles.twoColumnMobile}>
           <Panel title="Administrator" subtitle="Built-in platform owner" theme={theme}>
             <View style={styles.adminCard}>
               <Avatar name={admin?.name ?? 'Administrator'} uri={admin?.avatar} size={62} />
@@ -2421,8 +2421,10 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flexGrow: 1,
+    flexShrink: 1,
     flexBasis: 200,
-    minWidth: 160,
+    minWidth: 150,
+    maxWidth: '100%',
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     padding: 15,
@@ -2459,11 +2461,20 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'flex-start',
     gap: 18,
+    minWidth: 0,
+  },
+  twoColumnMobile: {
+    flexDirection: 'column',
+    gap: 18,
+    width: '100%',
+    minWidth: 0,
   },
   panel: {
     flexGrow: 1,
+    flexShrink: 1,
     flexBasis: 420,
     minWidth: 0,
+    maxWidth: '100%',
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
@@ -2572,7 +2583,10 @@ const styles = StyleSheet.create({
   },
   quickAction: {
     flexGrow: 1,
-    flexBasis: 170,
+    flexShrink: 1,
+    flexBasis: 150,
+    minWidth: 140,
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,

@@ -36,7 +36,7 @@ interface AuthContextValue {
   signIn: (identifier: string, password: string) => Promise<AuthResult>;
   signUp: (input: SignUpInput) => Promise<AuthResult>;
   signOut: () => Promise<void>;
-  updateProfile: (updates: Partial<Account>) => void;
+  updateProfile: (updates: Partial<Account>) => Promise<AuthResult>;
   resetPassword: (identifier: string, newPassword: string) => AuthResult;
   adminUpdateUser: (id: string, updates: Partial<Account>) => Promise<AuthResult>;
   adminDeleteUser: (id: string) => Promise<AuthResult>;
@@ -252,18 +252,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateProfile = useCallback(
-    (updates: Partial<Account>) => {
+    async (updates: Partial<Account>): Promise<AuthResult> => {
       const payload: Record<string, unknown> = {};
       if (updates.name) payload.name = updates.name;
-      if (updates.avatar !== undefined) payload.image = updates.avatar;
+      if (updates.avatar !== undefined) payload.image = updates.avatar || null;
       if (updates.about !== undefined) payload.about = updates.about;
 
-      if (Object.keys(payload).length === 0) return;
+      if (Object.keys(payload).length === 0) return { ok: true };
 
-      void authClient
-        .updateUser(payload as never)
-        .then(() => refetch())
-        .catch(() => undefined);
+      try {
+        const result = await authClient.updateUser(payload as never);
+        if (result.error) {
+          return {
+            ok: false,
+            error: result.error.message ?? 'Unable to save your profile right now.',
+          };
+        }
+        await refetch();
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : 'Unable to save your profile.',
+        };
+      }
     },
     [refetch],
   );

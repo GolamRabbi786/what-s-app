@@ -181,9 +181,13 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
 
   useEffect(() => {
     if (!recording) return;
-    const interval = setInterval(() => setRecordSeconds((value) => value + 1), 1000);
-    return () => clearInterval(interval);
-  }, [recording]);
+    const tick = setInterval(() => setRecordSeconds((value) => value + 1), 1000);
+    const heartbeat = setInterval(() => setTypingMode(chat.id, 'recording'), 4000);
+    return () => {
+      clearInterval(tick);
+      clearInterval(heartbeat);
+    };
+  }, [recording, chat.id, setTypingMode]);
 
   useEffect(() => {
     return () => {
@@ -1022,10 +1026,17 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             <Text style={[styles.recordingText, { color: theme.text }]}>
               Recording {formatSeconds(recordSeconds)}
             </Text>
-            <Pressable onPress={() => void stopRecording(true)} style={styles.recordingCancel}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel recording"
+              onPress={() => void stopRecording(true)}
+              style={styles.recordingCancel}
+            >
               <X color={theme.textSecondary} size={17} />
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send voice message"
               onPress={() => void stopRecording(false)}
               style={[styles.recordingSend, { backgroundColor: theme.accent }]}
             >

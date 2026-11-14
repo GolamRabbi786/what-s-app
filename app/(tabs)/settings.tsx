@@ -34,9 +34,12 @@ import {
   Wifi,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   ImageBackground,
   Platform,
@@ -135,6 +138,8 @@ function SettingsHome() {
   const [editName, setEditName] = useState(state.user.name);
   const [editAbout, setEditAbout] = useState(state.user.about);
   const [editAvatar, setEditAvatar] = useState(state.user.avatar);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [cacheCleared, setCacheCleared] = useState(false);
   const [faqOpen, setFaqOpen] = useState<string | null>(null);
   const [linkedDevices, setLinkedDevices] = useState(() => [
@@ -162,19 +167,102 @@ function SettingsHome() {
     setEditOpen(true);
   };
 
-  const saveProfile = () => {
-    if (!editName.trim()) return;
+  const saveProfile = async () => {
+    if (!editName.trim() || savingProfile) return;
+    setSavingProfile(true);
+    const result = await updateProfile({
+      name: editName.trim(),
+      about: editAbout.trim(),
+      avatar: editAvatar ?? '',
+    });
+    setSavingProfile(false);
+    if (!result.ok) {
+      Alert.alert('Profile not saved', result.error ?? 'Please try again in a moment.');
+      return;
+    }
     updateUser({
       name: editName.trim(),
       about: editAbout.trim(),
       avatar: editAvatar,
     });
-    updateProfile({
-      name: editName.trim(),
-      about: editAbout.trim(),
-      avatar: editAvatar,
-    });
     setEditOpen(false);
+  };
+
+  const prepareAvatar = async (asset: ImagePicker.ImagePickerAsset) => {
+    let uri = asset.uri;
+    try {
+      const context = ImageManipulator.manipulate(uri).resize({ width: 320 });
+      const image = await context.renderAsync();
+      const result = await image.saveAsync({
+        compress: 0.62,
+        format: SaveFormat.JPEG,
+        base64: true,
+      });
+      if (result.base64) uri = `data:image/jpeg;base64,${result.base64}`;
+    } catch {
+      if (asset.base64) {
+        uri = `data:image/${asset.mimeType?.split('/')[1] ?? 'jpeg'};base64,${asset.base64}`;
+      }
+    }
+    if (uri.length > 1_600_000) {
+      Alert.alert('Photo is too large', 'Choose a smaller photo to use as your profile picture.');
+      return;
+    }
+    setEditAvatar(uri);
+  };
+
+  const pickFromLibrary = async () => {
+    if (avatarBusy) return;
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Photo access needed',
+          'Allow photo access so you can choose a profile picture from your device.',
+        );
+        return;
+      }
+      setAvatarBusy(true);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      });
+      if (!result.canceled && result.assets[0]) await prepareAvatar(result.assets[0]);
+    } catch {
+      Alert.alert('Could not open photos', 'Please try again from your device gallery.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const takePhoto = async () => {
+    if (avatarBusy) return;
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Camera access needed',
+          'Allow camera access to take a new profile picture.',
+        );
+        return;
+      }
+      setAvatarBusy(true);
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      });
+      if (!result.canceled && result.assets[0]) await prepareAvatar(result.assets[0]);
+    } catch {
+      Alert.alert('Could not open camera', 'Please try again or upload a photo instead.');
+    } finally {
+      setAvatarBusy(false);
+    }
   };
 
   const invite = () => {
@@ -544,22 +632,26 @@ function SettingsHome() {
         maxWidth={460}
         footer={
           <Pressable
-            onPress={saveProfile}
-            disabled={!editName.trim()}
+            onPress={() => void saveProfile()}
+            disabled={!editName.trim() || savingProfile}
             style={({ pressed }) => [
               styles.saveButton,
               { backgroundColor: editName.trim() ? theme.accent : theme.chip },
               pressed && { opacity: 0.8 },
             ]}
           >
-            <Check color={editName.trim() ? '#ffffff' : theme.textMuted} size={17} />
+            {savingProfile ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <Check color={editName.trim() ? '#ffffff' : theme.textMuted} size={17} />
+            )}
             <Text
               style={[
                 styles.saveButtonText,
                 { color: editName.trim() ? '#ffffff' : theme.textMuted },
               ]}
             >
-              Save profile
+              {savingProfile ? 'Saving…' : 'Save profile'}
             </Text>
           </Pressable>
         }
@@ -591,6 +683,55 @@ function SettingsHome() {
               ) : null}
             </Pressable>
           ))}
+        </View>
+
+        <View style={styles.avatarActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Upload profile photo"
+            disabled={avatarBusy}
+            onPress={() => void pickFromLibrary()}
+            style={({ pressed }) => [
+              styles.avatarAction,
+              { backgroundColor: theme.chip },
+              pressed && { opacity: 0.75 },
+            ]}
+          >
+            {avatarBusy ? (
+              <ActivityIndicator color={theme.accentDark} size="small" />
+            ) : (
+              <Camera color={theme.accentDark} size={16} />
+            )}
+            <Text style={[styles.avatarActionText, { color: theme.text }]}>Upload photo</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Take profile photo"
+            disabled={avatarBusy}
+            onPress={() => void takePhoto()}
+            style={({ pressed }) => [
+              styles.avatarAction,
+              { backgroundColor: theme.chip },
+              pressed && { opacity: 0.75 },
+            ]}
+          >
+            <Camera color={theme.accentDark} size={16} />
+            <Text style={[styles.avatarActionText, { color: theme.text }]}>Take photo</Text>
+          </Pressable>
+          {editAvatar ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Remove profile photo"
+              onPress={() => setEditAvatar('')}
+              style={({ pressed }) => [
+                styles.avatarRemove,
+                { borderColor: theme.border },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Trash2 color={theme.danger ?? '#ea4335'} size={15} />
+            </Pressable>
+          ) : null}
         </View>
 
         <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Your name</Text>
@@ -1323,6 +1464,8 @@ const styles = StyleSheet.create({
   profileStats: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    rowGap: 10,
     marginTop: 20,
     paddingTop: 15,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -1330,7 +1473,7 @@ const styles = StyleSheet.create({
   },
   profileStat: {
     alignItems: 'center',
-    minWidth: 46,
+    minWidth: 42,
   },
   profileStatValue: {
     color: '#ffffff',
@@ -1346,13 +1489,14 @@ const styles = StyleSheet.create({
     width: StyleSheet.hairlineWidth,
     height: 24,
     backgroundColor: 'rgba(255,255,255,0.24)',
-    marginHorizontal: 14,
+    marginHorizontal: 10,
   },
   profilePlan: {
     marginLeft: 'auto',
+    flexShrink: 0,
     backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: 10,
   },
   profilePlanLabel: {
@@ -1591,6 +1735,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 3,
     borderColor: '#ffffff',
+  },
+  avatarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+  },
+  avatarAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 36,
+    borderRadius: 18,
+  },
+  avatarActionText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  avatarRemove: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarChoicesLabel: {
     fontSize: 8.5,

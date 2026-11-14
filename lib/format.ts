@@ -79,6 +79,7 @@ export function getChatPreview(chat: Chat, messages: Record<string, Message[]>) 
   const last = getLastMessage(chat.id, messages);
   if (!last) return 'No messages yet';
 
+  if (last.kind === 'call') return last.text || 'Call';
   if (last.kind === 'voice') return `Voice message (${last.duration ?? '0:00'})`;
   if (last.kind === 'image' && !last.text) return 'Photo';
   if (last.kind === 'document') return last.fileName ?? 'Document';
