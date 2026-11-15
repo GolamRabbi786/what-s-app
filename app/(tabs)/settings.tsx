@@ -281,15 +281,15 @@ function SettingsHome() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <FadeSlideIn style={styles.page} offset={10}>
           <View style={styles.header}>
-            <View>
+            <View style={styles.headerText}>
               <Text style={[styles.title, { color: theme.text }]}>Settings</Text>
-              <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+              <Text style={[styles.subtitle, { color: theme.textSecondary }]} numberOfLines={2}>
                 Manage your profile, privacy, and preferences
               </Text>
             </View>
-            <View style={[styles.demoPill, { backgroundColor: theme.chip }]}>
+            <View style={[styles.demoPill, styles.demoPillFixed, { backgroundColor: theme.chip }]}>
               <Info color={theme.textMuted} size={13} />
-              <Text style={[styles.demoPillText, { color: theme.textSecondary }]}>
+              <Text style={[styles.demoPillText, { color: theme.textSecondary }]} numberOfLines={1}>
                 @{currentUser?.username ?? 'account'}
               </Text>
             </View>
@@ -1359,6 +1359,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 16,
     marginBottom: 18,
+  },
+  headerText: {
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  demoPillFixed: {
+    flexShrink: 0,
   },
   title: {
     fontSize: 27,
