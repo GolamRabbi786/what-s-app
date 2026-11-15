@@ -136,11 +136,14 @@ export function NewChatModal({ visible, onClose }: NewChatModalProps) {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search name or number"
+              placeholder="Search name, @username or number"
               placeholderTextColor={theme.textMuted}
               style={[styles.searchInput, { color: theme.text }]}
             />
           </View>
+          <Text style={[styles.searchHint, { color: theme.textMuted }]}>
+            Find anyone by their phone number or @username.
+          </Text>
 
           <Pressable
             onPress={() => setStep('group')}
@@ -207,8 +210,20 @@ export function NewChatModal({ visible, onClose }: NewChatModalProps) {
                 <View style={styles.contactText}>
                   <Text style={[styles.contactName, { color: theme.text }]}>{contact.name}</Text>
                   <Text style={[styles.contactSub, { color: theme.textSecondary }]} numberOfLines={1}>
-                    {contact.online ? 'online' : contact.about || contact.phone || 'WhatsApp contact'}
+                    {contact.online
+                      ? 'online'
+                      : search.trim()
+                        ? contact.phone
+                          ? `${contact.phone} · @${contact.username}`
+                          : `@${contact.username}`
+                        : contact.about || contact.phone || 'WhatsApp contact'}
                   </Text>
+                  {search.trim() ? (
+                    <Text style={[styles.contactUser, { color: theme.textMuted }]} numberOfLines={1}>
+                      @{contact.username}
+                      {contact.phone ? ` · ${contact.phone}` : ''}
+                    </Text>
+                  ) : null}
                 </View>
                 <MessageSquarePlus color={theme.textMuted} size={18} />
               </Pressable>
@@ -301,6 +316,16 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
+  },
+  searchHint: {
+    fontSize: 11,
+    marginTop: -9,
+    marginBottom: 12,
+    paddingHorizontal: 2,
+  },
+  contactUser: {
+    fontSize: 11,
+    marginTop: 2,
   },
   actionRow: {
     flexDirection: 'row',

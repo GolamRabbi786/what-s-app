@@ -2,7 +2,7 @@ export type ThemeMode = 'light' | 'dark';
 
 export type ChatFilter = 'all' | 'unread' | 'favorites' | 'groups';
 
-export type MessageKind = 'text' | 'image' | 'voice' | 'document' | 'location' | 'call';
+export type MessageKind = 'text' | 'image' | 'video' | 'voice' | 'document' | 'location' | 'call';
 
 export type MessageStatus = 'sent' | 'delivered' | 'read';
 
@@ -27,6 +27,8 @@ export interface Message {
   fileSize?: string;
   replyTo?: ReplyTo;
   reactions?: string[];
+  forwarded?: boolean;
+  editedAt?: string;
 }
 
 export interface Chat {
@@ -63,7 +65,7 @@ export interface Contact {
 
 export interface StatusItem {
   id: string;
-  type: 'image' | 'text';
+  type: 'image' | 'video' | 'text';
   image?: string;
   caption?: string;
   background?: string;
@@ -120,6 +122,7 @@ export interface AppState {
   communities: Community[];
   contacts: Contact[];
   typing: TypingPeer[];
+  blocked: string[];
   user: AppUser;
 }
 
@@ -196,7 +199,7 @@ export interface AdminChatSummary {
 
 export interface AdminStatusItem {
   id: string;
-  type: 'image' | 'text';
+  type: 'image' | 'video' | 'text';
   caption?: string;
   image?: string;
   createdAt: string;

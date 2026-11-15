@@ -21,8 +21,10 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -46,7 +48,7 @@ import { Sheet } from '../../components/Sheet';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatChatTime, getChatPreview } from '../../lib/format';
-import { Chat } from '../../lib/types';
+import { Chat, Contact } from '../../lib/types';
 
 export default function ChatsScreen() {
   return (
@@ -70,6 +72,8 @@ function ChatsHome() {
     setQuery,
     markAllRead,
     toggleTheme,
+    toggleChatFlag,
+    startDirectChat,
     typing,
   } = useApp();
   const { width } = useWindowDimensions();
@@ -113,6 +117,22 @@ function ChatsHome() {
   }, [state.chats, state.messages, filter, query]);
 
   const listWidth = Math.min(430, Math.max(342, width * 0.33));
+
+  const contactMatches = useMemo<Contact[]>(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return [];
+    const existingPeers = new Set(
+      state.chats.filter((chat) => !chat.group && chat.peerId).map((chat) => chat.peerId),
+    );
+    return state.contacts
+      .filter((contact) => !existingPeers.has(contact.id))
+      .filter((contact) =>
+        contact.name.toLowerCase().includes(normalized) ||
+        contact.username.toLowerCase().includes(normalized) ||
+        (contact.phone ?? '').replace(/\s+/g, '').includes(normalized.replace(/\s+/g, '')),
+      )
+      .slice(0, 6);
+  }, [query, state.contacts, state.chats]);
 
   const filterChips = [
     { key: 'all' as const, label: 'All', count: state.chats.filter((chat) => !chat.archived).length },
@@ -312,6 +332,58 @@ function ChatsHome() {
               />
             </FadeSlideIn>
           )}
+          ListFooterComponent={
+            query && contactMatches.length > 0 ? (
+              <View style={styles.contactSection}>
+                <Text style={[styles.contactSectionTitle, { color: theme.textSecondary }]}>
+                  Contacts on WhatsApp
+                </Text>
+                {contactMatches.map((contact) => (
+                  <FadeSlideIn key={contact.id} offset={8} duration={240}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Start chat with ${contact.name}`}
+                      onPress={() => {
+                        void (async () => {
+                          const chatId = await startDirectChat(contact.id);
+                          if (chatId) {
+                            setQuery('');
+                            openChat(chatId);
+                          }
+                        })();
+                      }}
+                      style={({ pressed }) => [
+                        styles.contactMatchRow,
+                        pressed && { backgroundColor: theme.panelHover },
+                      ]}
+                    >
+                      <Avatar
+                        name={contact.name}
+                        uri={contact.avatar}
+                        size={44}
+                        online={contact.online}
+                        showOnline
+                      />
+                      <View style={styles.contactMatchText}>
+                        <Text style={[styles.contactMatchName, { color: theme.text }]} numberOfLines={1}>
+                          {contact.name}
+                        </Text>
+                        <Text
+                          style={[styles.contactMatchMeta, { color: theme.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {contact.phone ? `${contact.phone} · ` : ''}@{contact.username}
+                        </Text>
+                      </View>
+                      <View style={[styles.contactMatchAction, { backgroundColor: theme.chip }]}>
+                        <MessageSquarePlus color={theme.accentDark} size={16} />
+                      </View>
+                    </Pressable>
+                  </FadeSlideIn>
+                ))}
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <View style={[styles.emptyIcon, { backgroundColor: theme.chip }]}>
@@ -360,13 +432,11 @@ function ChatsHome() {
 
       {desktop ? (
         <View style={styles.conversationPane}>
-          {activeChat ? (
-            <ChatWindow chat={activeChat} />
-          ) : (
-            <WelcomePane userName={state.user.name} />
-          )}
+          <WelcomePane userName={state.user.name} />
         </View>
       ) : null}
+
+      {desktop && activeChat ? <ChatPopup chat={activeChat} onClose={closeChat} /> : null}
 
       <Modal
         visible={!desktop && Boolean(activeChat)}
@@ -485,20 +555,35 @@ function ChatsHome() {
                   {getChatPreview(chat, state.messages)}
                 </Text>
               </View>
-              <Pressable
-                onPress={() => {
-                  openChat(chat.id);
-                  setArchivedOpen(false);
-                }}
-                style={({ pressed }) => [
-                  styles.unarchiveButton,
-                  { backgroundColor: theme.chip },
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <Archive color={theme.accentDark} size={15} />
-                <Text style={[styles.unarchiveText, { color: theme.accentDark }]}>Open</Text>
-              </Pressable>
+              <View style={styles.unarchiveActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Unarchive chat with ${chat.name}`}
+                  onPress={() => toggleChatFlag(chat.id, 'archived')}
+                  style={({ pressed }) => [
+                    styles.unarchiveButton,
+                    { backgroundColor: theme.chipActive },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Archive color={theme.accentDark} size={15} />
+                  <Text style={[styles.unarchiveText, { color: theme.accentDark }]}>Unarchive</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    openChat(chat.id);
+                    setArchivedOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.unarchiveButton,
+                    { backgroundColor: theme.chip },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <MessageCircle color={theme.textSecondary} size={15} />
+                  <Text style={[styles.unarchiveOpenText, { color: theme.textSecondary }]}>Open</Text>
+                </Pressable>
+              </View>
             </Pressable>
           ))
         )}
@@ -622,6 +707,77 @@ function MenuOption({
       <Icon color={theme.icon} size={19} />
       <Text style={[styles.menuOptionText, { color: theme.text }]}>{label}</Text>
     </Pressable>
+  );
+}
+
+function ChatPopup({ chat, onClose }: { chat: Chat; onClose: () => void }) {
+  const { theme } = useApp();
+  const { width, height } = useWindowDimensions();
+  const appear = useRef(new Animated.Value(0)).current;
+  const closingRef = useRef(false);
+
+  useEffect(() => {
+    closingRef.current = false;
+    appear.setValue(0);
+    Animated.parallel([
+      Animated.timing(appear, {
+        toValue: 1,
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [appear, chat.id]);
+
+  const handleClose = () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    Animated.timing(appear, {
+      toValue: 0,
+      duration: 170,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: false,
+    }).start(() => {
+      if (closingRef.current) onClose();
+    });
+  };
+
+  const cardWidth = Math.min(900, Math.max(360, width - 150));
+  const cardHeight = Math.min(760, Math.max(320, height - 110));
+
+  return (
+    <Modal transparent statusBarTranslucent onRequestClose={handleClose} animationType="none">
+      <View style={styles.popupBackdrop}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close chat window"
+          onPress={handleClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <Animated.View
+          style={[
+            styles.popupCard,
+            {
+              width: cardWidth,
+              height: cardHeight,
+              backgroundColor: theme.panel,
+              shadowColor: theme.shadow,
+              opacity: appear,
+              transform: [
+                {
+                  scale: appear.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1] }),
+                },
+                {
+                  translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }),
+                },
+              ],
+            },
+          ]}
+        >
+          <ChatWindow chat={chat} onClose={handleClose} />
+        </Animated.View>
+      </View>
+    </Modal>
   );
 }
 
@@ -948,6 +1104,60 @@ const styles = StyleSheet.create({
     minWidth: 0,
     minHeight: 0,
   },
+  popupBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(11, 20, 26, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  popupCard: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 26 },
+    shadowOpacity: 0.35,
+    shadowRadius: 60,
+    elevation: 18,
+    minHeight: 0,
+  },
+  contactSection: {
+    paddingBottom: 10,
+  },
+  contactSectionTitle: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  contactMatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  contactMatchText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  contactMatchName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  contactMatchMeta: {
+    fontSize: 11.5,
+  },
+  contactMatchAction: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1015,7 +1225,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 7,
   },
+  unarchiveActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   unarchiveText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  unarchiveOpenText: {
     fontSize: 10.5,
     fontWeight: '700',
   },

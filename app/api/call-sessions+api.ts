@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import { db } from '../../lib/db';
 import { user as userTable } from '../../lib/auth-schema';
-import { callLogs, callSessions, messages } from '../../lib/schema';
+import { blocks, callLogs, callSessions, messages } from '../../lib/schema';
 import {
   badRequest,
   errorMessage,
@@ -198,6 +198,24 @@ export async function POST(request: Request) {
         .limit(1);
       const peer = peers[0];
       if (!peer) return badRequest('That account could not be found.');
+
+      const blockRows = await db
+        .select({ blockerId: blocks.blockerId })
+        .from(blocks)
+        .where(
+          or(
+            and(eq(blocks.blockerId, me), eq(blocks.blockedId, peer.id)),
+            and(eq(blocks.blockerId, peer.id), eq(blocks.blockedId, me)),
+          ),
+        )
+        .limit(1);
+      if (blockRows[0]) {
+        return forbidden(
+          blockRows[0].blockerId === me
+            ? 'You blocked this contact. Unblock them to call.'
+            : 'You cannot call this contact right now.',
+        );
+      }
 
       const existing = await baseQuery()
         .where(

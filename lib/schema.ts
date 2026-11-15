@@ -67,7 +67,7 @@ export const messages = pgTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     text: text('text').notNull().default(''),
     kind: text('kind')
-      .$type<'text' | 'image' | 'voice' | 'document' | 'location' | 'call'>()
+      .$type<'text' | 'image' | 'video' | 'voice' | 'document' | 'location' | 'call'>()
       .notNull()
       .default('text'),
     image: text('image'),
@@ -75,6 +75,8 @@ export const messages = pgTable(
     fileName: text('file_name'),
     fileSize: text('file_size'),
     replyToId: text('reply_to_id'),
+    forwarded: boolean('forwarded').notNull().default(false),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('messages_chat_created_idx').on(table.chatId, table.createdAt)],
@@ -101,7 +103,7 @@ export const statuses = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
-    type: text('type').$type<'image' | 'text'>().notNull(),
+    type: text('type').$type<'image' | 'video' | 'text'>().notNull(),
     image: text('image'),
     caption: text('caption'),
     background: text('background'),
@@ -255,6 +257,23 @@ export const callSessions = pgTable(
   (table) => [
     index('call_sessions_callee_status_idx').on(table.calleeId, table.status),
     index('call_sessions_caller_status_idx').on(table.callerId, table.status),
+  ],
+);
+
+export const blocks = pgTable(
+  'blocks',
+  {
+    blockerId: text('blocker_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    blockedId: text('blocked_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.blockerId, table.blockedId] }),
+    index('blocks_blocked_idx').on(table.blockedId),
   ],
 );
 

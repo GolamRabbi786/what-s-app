@@ -85,7 +85,8 @@
             "./assets/sounds/call-end.wav"
           ]
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

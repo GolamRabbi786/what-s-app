@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, ne, or } from 'drizzle-orm';
 import { db } from './db';
 import { user as userTable } from './auth-schema';
 import {
+  blocks,
   callLogs,
   chatMembers,
   chats,
@@ -303,6 +304,8 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
         fileSize: message.fileSize ?? undefined,
         replyTo,
         reactions: reactionsByMessage.get(message.id),
+        forwarded: message.forwarded || undefined,
+        editedAt: message.editedAt ? message.editedAt.toISOString() : undefined,
       };
     });
 
@@ -480,6 +483,12 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
 
   const contacts = contactRows.map(toContact);
 
+  const blockedRows = await db
+    .select({ blockedId: blocks.blockedId })
+    .from(blocks)
+    .where(eq(blocks.blockerId, userId));
+  const blocked = blockedRows.map((row) => row.blockedId);
+
   const state: AppState = {
     version: SEED_VERSION,
     theme: 'light',
@@ -490,6 +499,7 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
     communities: resultCommunities,
     contacts,
     typing,
+    blocked,
     user: toAppUser(me),
   };
 
@@ -502,6 +512,7 @@ export async function loadAppState(userId: string): Promise<LoadedAppState> {
     callRows.length,
     resultCommunities.length,
     contacts.length,
+    blocked.length,
     typing.length,
     typing.reduce(
       (latest, peer) => {

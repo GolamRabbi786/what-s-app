@@ -66,21 +66,45 @@ export const sendMessageSchema = z
   .object({
     chatId: z.string().min(1),
     text: z.string().max(8000).optional().default(''),
-    kind: z.enum(['text', 'image', 'voice', 'document', 'location']).optional().default('text'),
+    kind: z
+      .enum(['text', 'image', 'video', 'voice', 'document', 'location'])
+      .optional()
+      .default('text'),
     image: z.string().max(3_000_000).optional(),
+    video: z.string().max(6_000_000).optional(),
     duration: z.string().max(20).optional(),
     fileName: z.string().max(200).optional(),
     fileSize: z.string().max(40).optional(),
     replyToId: z.string().max(120).optional(),
+    forwardOf: z.string().max(120).optional(),
   })
   .refine(
     (value) =>
       value.text.trim().length > 0 ||
       Boolean(value.image) ||
+      Boolean(value.video) ||
       Boolean(value.fileName) ||
       Boolean(value.duration),
     { message: 'Write a message first.' },
   );
+
+export const messageUpdateSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('react'),
+    id: z.string().min(1),
+    emoji: z.string().min(1).max(16),
+  }),
+  z.object({
+    action: z.literal('edit'),
+    id: z.string().min(1),
+    text: z.string().trim().min(1, 'Write something first.').max(8000),
+  }),
+]);
+
+export const blockActionSchema = z.object({
+  userId: z.string().min(1),
+  action: z.enum(['block', 'unblock']),
+});
 
 export const messageDeleteSchema = z.union([
   z.object({ id: z.string().min(1) }),
@@ -92,11 +116,18 @@ export const reactionSchema = z.object({
   emoji: z.string().min(1).max(16),
 });
 
-export const statusCreateSchema = z.object({
-  caption: z.string().max(700).default(''),
-  background: z.string().max(40).default('#1a6b5c'),
-  image: z.string().max(3_000_000).optional(),
-});
+export const statusCreateSchema = z
+  .object({
+    caption: z.string().max(700).default(''),
+    background: z.string().max(40).default('#1a6b5c'),
+    image: z.string().max(3_000_000).optional(),
+    video: z.string().max(6_000_000).optional(),
+    duration: z.number().int().min(3).max(60).optional(),
+  })
+  .refine(
+    (value) => value.caption.trim().length > 0 || Boolean(value.image) || Boolean(value.video),
+    { message: 'Add a photo, video or text for your status.' },
+  );
 
 export const statusActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('view'), groupId: z.string().min(1).max(120) }),

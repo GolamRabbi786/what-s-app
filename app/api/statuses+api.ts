@@ -36,16 +36,18 @@ export async function POST(request: Request) {
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const background =
       parsed.data.background || STATUS_COLORS[Math.floor(Math.random() * STATUS_COLORS.length)];
+    const type = parsed.data.video ? 'video' : parsed.data.image ? 'image' : 'text';
+    const media = parsed.data.image ?? parsed.data.video;
 
     const id = newId('status');
     await db.insert(statuses).values({
       id,
       userId: context.profile.id,
-      type: parsed.data.image ? 'image' : 'text',
-      image: parsed.data.image,
+      type,
+      image: media,
       caption: parsed.data.caption.trim(),
       background,
-      duration: 5,
+      duration: parsed.data.duration ?? 5,
       createdAt: now,
       expiresAt,
     });

@@ -9,9 +9,11 @@ import {
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import {
   Archive,
   ArrowLeft,
+  Ban,
   Bell,
   BellOff,
   Camera,
@@ -20,7 +22,9 @@ import {
   ChevronDown,
   Copy,
   CornerUpLeft,
+  Download,
   FileText,
+  Forward,
   Image as ImageIcon,
   Info,
   Lock,
@@ -29,12 +33,15 @@ import {
   MoreVertical,
   Paperclip,
   Pause,
+  Pencil,
   Phone,
   PhoneMissed,
   Play,
   Search,
   Send,
+  ShieldCheck,
   Smile,
+  SmilePlus,
   Star,
   Trash2,
   User,
@@ -45,6 +52,8 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  Easing,
   FlatList,
   Image,
   Platform,
@@ -57,6 +66,7 @@ import {
 } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { formatClock, formatDateLabel } from '../lib/format';
+import { downloadDataUri, fileToDataUri } from '../lib/media';
 import { Chat, Contact, Message, ReplyTo } from '../lib/types';
 import { AnimatedBackground } from './AnimatedBackground';
 import { Avatar } from './Avatar';
@@ -89,30 +99,8 @@ function formatSeconds(value: number) {
 }
 
 const MAX_AUDIO_CHARS = 3_000_000;
-
-async function audioToDataUri(uri: string): Promise<string | null> {
-  try {
-    if (Platform.OS === 'web') {
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const buffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      const chunk = 0x8000;
-      for (let index = 0; index < bytes.length; index += chunk) {
-        binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
-      }
-      const base64 = globalThis.btoa(binary);
-      return `data:${blob.type || 'audio/webm'};base64,${base64}`;
-    }
-    const { File } = await import('expo-file-system');
-    const file = new File(uri);
-    const base64 = await file.base64();
-    return `data:audio/mp4;base64,${base64}`;
-  } catch {
-    return null;
-  }
-}
+const MAX_VIDEO_CHARS = 5_900_000;
+const MAX_DOC_CHARS = 2_900_000;
 
 export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const {
@@ -122,6 +110,9 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     sendMessage,
     deleteMessage,
     toggleReaction,
+    editMessage,
+    forwardMessage,
+    blockUser,
     toggleChatFlag,
     clearChatMessages,
     closeChat,
@@ -133,7 +124,11 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const [paneWidth, setPaneWidth] = useState(0);
   const [draft, setDraft] = useState('');
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
+  const [editing, setEditing] = useState<Message | null>(null);
+  const [forwardOf, setForwardOf] = useState<Message | null>(null);
+  const [forwardQuery, setForwardQuery] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [moreEmojis, setMoreEmojis] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -144,6 +139,10 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+
+  const inputGlow = useRef(new Animated.Value(0)).current;
+  const sendScale = useRef(new Animated.Value(0.6)).current;
+  const emojiPanelValue = useRef(new Animated.Value(0)).current;
 
   const listRef = useRef<FlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -159,7 +158,11 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   useEffect(() => {
     setDraft('');
     setReplyTo(null);
+    setEditing(null);
+    setForwardOf(null);
+    setForwardQuery('');
     setEmojiOpen(false);
+    setMoreEmojis(false);
     setSearchOpen(false);
     setSearchQuery('');
     setPlayingId(null);
@@ -178,6 +181,54 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
       }
     };
   }, [chat.id]);
+
+  const blockedByMe = !chat.group && chat.peerId ? state.blocked.includes(chat.peerId) : false;
+
+  const hadDraftRef = useRef(false);
+
+  useEffect(() => {
+    const has = Boolean(draft.trim());
+    if (has && !hadDraftRef.current) {
+      sendScale.setValue(0.5);
+      Animated.spring(sendScale, {
+        toValue: 1,
+        friction: 4,
+        tension: 210,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+    hadDraftRef.current = has;
+  }, [draft, sendScale]);
+
+  useEffect(() => {
+    Animated.timing(emojiPanelValue, {
+      toValue: emojiOpen ? 1 : 0,
+      duration: 190,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [emojiOpen, emojiPanelValue]);
+
+  const focusInput = () => {
+    Animated.spring(inputGlow, {
+      toValue: 1,
+      friction: 7,
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const blurInput = () => {
+    Animated.spring(inputGlow, {
+      toValue: 0,
+      friction: 8,
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const inputBorderColor = inputGlow.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['transparent', theme.accent],
+  });
 
   useEffect(() => {
     if (!recording) return;
@@ -254,11 +305,25 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
   const handleSend = () => {
     if (!draft.trim()) return;
     setTypingMode(chat.id, 'idle');
-    sendMessage(chat.id, draft, replyTo ? { replyTo } : undefined);
+    if (editing) {
+      const target = editing;
+      void editMessage(chat.id, target.id, draft);
+      setEditing(null);
+    } else {
+      sendMessage(chat.id, draft, replyTo ? { replyTo } : undefined);
+    }
     setDraft('');
     setReplyTo(null);
     setEmojiOpen(false);
     setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const startEdit = (message: Message) => {
+    setEditing(message);
+    setDraft(message.text);
+    setActionMessage(null);
+    setEmojiOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   const startReply = (message: Message) => {
@@ -268,11 +333,13 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
       text:
         message.kind === 'image'
           ? 'Photo'
-          : message.kind === 'voice'
-            ? 'Voice message'
-            : message.kind === 'document'
-              ? message.fileName ?? 'Document'
-              : message.text,
+          : message.kind === 'video'
+            ? 'Video'
+            : message.kind === 'voice'
+              ? 'Voice message'
+              : message.kind === 'document'
+                ? message.fileName ?? 'Document'
+                : message.text,
     });
     setActionMessage(null);
     setTimeout(() => inputRef.current?.focus(), 100);
@@ -303,7 +370,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
       if (recorder.isRecording) {
         await recorder.stop();
         const uri = recorder.uri;
-        if (uri) audio = await audioToDataUri(uri);
+        if (uri) audio = await fileToDataUri(uri, 'audio/mp4');
       }
     } catch {
       audio = null;
@@ -475,6 +542,51 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
     }
   };
 
+  const attachVideo = async (fromCamera: boolean) => {
+    try {
+      const permission = fromCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission needed',
+          fromCamera
+            ? 'Allow camera access to record a video.'
+            : 'Allow photo access to share a video.',
+        );
+        return;
+      }
+
+      const result = fromCamera
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'] })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
+
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const seconds = asset.duration ? Math.max(1, Math.round(asset.duration)) : 0;
+      const duration = `0:${String(Math.min(59, seconds)).padStart(2, '0')}`;
+      const media = await fileToDataUri(asset.uri, 'video/mp4');
+      if (!media) {
+        Alert.alert('Unable to attach video', 'The video could not be read. Please try another clip.');
+        return;
+      }
+      if (media.length > MAX_VIDEO_CHARS) {
+        Alert.alert(
+          'Video is too large',
+          'Please pick a shorter video (under about 4 MB) to share in this chat.',
+        );
+        return;
+      }
+      sendMessage(chat.id, '', { kind: 'video', video: media, duration });
+      setAttachOpen(false);
+    } catch (error) {
+      Alert.alert(
+        'Unable to attach video',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    }
+  };
+
   const attachDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -488,8 +600,24 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
           : `${Math.max(1, Math.round(file.size / 1024))} KB`
         : undefined;
+      const mimeType = file.mimeType ?? 'application/octet-stream';
+      const data = await fileToDataUri(file.uri, mimeType);
+      if (data && data.length > MAX_DOC_CHARS) {
+        Alert.alert(
+          'Document is too large',
+          'Files up to about 2 MB can be shared with their contents. Sending details only.',
+        );
+        sendMessage(chat.id, '', {
+          kind: 'document',
+          fileName: file.name || 'Document',
+          fileSize: size,
+        });
+        setAttachOpen(false);
+        return;
+      }
       sendMessage(chat.id, '', {
         kind: 'document',
+        image: data ?? undefined,
         fileName: file.name || 'Document',
         fileSize: size,
       });
@@ -500,6 +628,19 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
         error instanceof Error ? error.message : 'Please try again.',
       );
     }
+  };
+
+  const openDocument = (message: Message) => {
+    if (!message.image) {
+      Alert.alert(
+        'No file attached',
+        'This document was shared without its contents, so there is nothing to open.',
+      );
+      return;
+    }
+    const name = message.fileName ?? 'document';
+    if (downloadDataUri(name, message.image)) return;
+    Alert.alert('Download not available', 'Open this chat on the web app to download the file.');
   };
 
   const attachLocation = async () => {
@@ -554,9 +695,14 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
               borderTopRightRadius: mine ? 5 : 14,
               borderTopLeftRadius: mine ? 14 : 5,
             },
-            message.kind === 'image' && styles.mediaBubble,
+            message.kind === 'image' || message.kind === 'video' ? styles.mediaBubble : null,
           ]}
         >
+          {message.forwarded ? (
+            <Text style={[styles.forwardedLabel, { color: theme.textSecondary }]}>
+              Forwarded
+            </Text>
+          ) : null}
           {showSender ? (
             <Text style={[styles.senderName, { color: senderColor(message.senderName) }]}>
               {message.senderName}
@@ -602,6 +748,10 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                 <ChatImage uri={message.image} width={imageWidth} height={imageWidth * 0.66} />
               </View>
             </View>
+          ) : null}
+
+          {message.kind === 'video' && message.image ? (
+            <ChatVideo uri={message.image} width={imageWidth} height={imageWidth * 0.62} />
           ) : null}
 
           {message.kind === 'voice' ? (
@@ -655,9 +805,22 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                   {message.fileName}
                 </Text>
                 <Text style={[styles.documentMeta, { color: theme.textSecondary }]}>
-                  {message.fileSize ?? 'PDF'} · Document
+                  {message.fileSize ?? 'Document'} · Document
                 </Text>
               </View>
+              {message.image ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Download document"
+                  onPress={() => openDocument(message)}
+                  style={({ pressed }) => [
+                    styles.documentDownload,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Download color={theme.accentDark} size={18} />
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
 
@@ -725,6 +888,16 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             >
               {formatClock(message.createdAt)}
             </Text>
+            {message.editedAt ? (
+              <Text
+                style={[
+                  styles.editedLabel,
+                  { color: theme.mode === 'dark' ? 'rgba(233,237,239,0.5)' : 'rgba(17,27,33,0.42)' },
+                ]}
+              >
+                Edited
+              </Text>
+            ) : null}
             {mine ? (
               <MessageTicks status={message.status} theme={theme} />
             ) : null}
@@ -968,10 +1141,22 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
       />
 
       {emojiOpen ? (
-        <View
+        <Animated.View
           style={[
             styles.emojiPanel,
-            { backgroundColor: theme.panel, borderTopColor: theme.border },
+            {
+              backgroundColor: theme.panel,
+              borderTopColor: theme.border,
+              opacity: emojiPanelValue,
+              transform: [
+                {
+                  translateY: emojiPanelValue.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            },
           ]}
         >
           <View style={styles.emojiGrid}>
@@ -985,7 +1170,7 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
               </Pressable>
             ))}
           </View>
-        </View>
+        </Animated.View>
       ) : null}
 
       <View
@@ -1020,7 +1205,60 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           </View>
         ) : null}
 
-        {recording ? (
+        {editing ? (
+          <View
+            style={[
+              styles.composerReply,
+              { backgroundColor: theme.panel, borderLeftColor: theme.warning },
+            ]}
+          >
+            <View style={styles.composerReplyText}>
+              <Text style={[styles.composerReplyAuthor, { color: theme.warning }]}>
+                Editing message
+              </Text>
+              <Text style={[styles.composerReplyBody, { color: theme.textSecondary }]} numberOfLines={1}>
+                {editing.text}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel editing"
+              onPress={() => {
+                setEditing(null);
+                setDraft('');
+              }}
+              style={styles.replyCancel}
+            >
+              <X color={theme.textMuted} size={16} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {blockedByMe ? (
+          <View
+            style={[
+              styles.blockedBanner,
+              { backgroundColor: theme.panel, borderColor: theme.border },
+            ]}
+          >
+            <Ban color={theme.danger} size={18} />
+            <Text style={[styles.blockedText, { color: theme.textSecondary }]} numberOfLines={2}>
+              You blocked this contact. Unblock to send messages and call again.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Unblock contact"
+              onPress={() => chat.peerId && void blockUser(chat.peerId, 'unblock')}
+              style={({ pressed }) => [
+                styles.unblockButton,
+                { backgroundColor: theme.accent },
+                pressed && { opacity: 0.8 },
+              ]}
+            >
+              <Text style={styles.unblockText}>Unblock</Text>
+            </Pressable>
+          </View>
+        ) : recording ? (
           <View style={[styles.recordingBar, { backgroundColor: theme.panel }]}>
             <View style={styles.recordingDot} />
             <Text style={[styles.recordingText, { color: theme.text }]}>
@@ -1067,15 +1305,22 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             >
               <Paperclip color={theme.icon} size={23} />
             </Pressable>
-            <View style={[styles.inputWrap, { backgroundColor: theme.panel }]}>
+            <Animated.View
+              style={[
+                styles.inputWrap,
+                { backgroundColor: theme.panel, borderColor: inputBorderColor },
+              ]}
+            >
               <TextInput
                 ref={inputRef}
                 value={draft}
                 onChangeText={handleDraftChange}
-                placeholder="Type a message"
+                placeholder={editing ? 'Update your message' : 'Type a message'}
                 placeholderTextColor={theme.textMuted}
                 multiline
                 style={[styles.input, { color: theme.text }]}
+                onFocus={focusInput}
+                onBlur={blurInput}
                 onKeyPress={(event) => {
                   const nativeEvent = event.nativeEvent as typeof event.nativeEvent & {
                     key?: string;
@@ -1087,20 +1332,27 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                   }
                 }}
               />
-            </View>
+            </Animated.View>
             {draft.trim() ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Send message"
-                onPress={handleSend}
-                style={({ pressed }) => [
-                  styles.sendButton,
-                  { backgroundColor: theme.accent },
-                  pressed && { opacity: 0.78 },
+              <Animated.View
+                style={[
+                  styles.sendButtonWrap,
+                  { transform: [{ scale: sendScale }], opacity: sendScale },
                 ]}
               >
-                <Send color="#ffffff" size={19} />
-              </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Send message"
+                  onPress={handleSend}
+                  style={({ pressed }) => [
+                    styles.sendButton,
+                    { backgroundColor: theme.accent },
+                    pressed && { opacity: 0.78 },
+                  ]}
+                >
+                  <Send color="#ffffff" size={19} />
+                </Pressable>
+              </Animated.View>
             ) : (
               <Pressable
                 accessibilityRole="button"
@@ -1136,6 +1388,14 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             label="Camera"
             color="#e17076"
             onPress={() => void attachPhoto(true)}
+            textColor={theme.text}
+            secondary={theme.textSecondary}
+          />
+          <AttachOption
+            icon={Video}
+            label="Video"
+            color="#a13b2f"
+            onPress={() => void attachVideo(false)}
             textColor={theme.text}
             secondary={theme.textSecondary}
           />
@@ -1295,7 +1555,36 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                   <Text style={styles.reactionEmoji}>{emoji}</Text>
                 </Pressable>
               ))}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="More reactions"
+                onPress={() => setMoreEmojis((value) => !value)}
+                style={({ pressed }) => [
+                  styles.reactionButton,
+                  { backgroundColor: theme.chip, borderWidth: 1.5, borderColor: theme.accent },
+                  pressed && { opacity: 0.65 },
+                ]}
+              >
+                <SmilePlus color={theme.accentDark} size={20} />
+              </Pressable>
             </View>
+            {moreEmojis ? (
+              <View style={[styles.moreEmojiWrap, { backgroundColor: theme.chip }]}>
+                {EMOJIS.map((emoji) => (
+                  <Pressable
+                    key={`more-${emoji}`}
+                    onPress={() => {
+                      toggleReaction(chat.id, actionMessage.id, emoji);
+                      setMoreEmojis(false);
+                      setActionMessage(null);
+                    }}
+                    style={({ pressed }) => [styles.emojiButton, pressed && { opacity: 0.6 }]}
+                  >
+                    <Text style={styles.reactionEmojiSmall}>{emoji}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             <View style={styles.menuList}>
               <MenuRow
                 icon={CornerUpLeft}
@@ -1305,12 +1594,34 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                 onPress={() => startReply(actionMessage)}
               />
               <MenuRow
-                icon={Copy}
-                label="Copy text"
+                icon={Forward}
+                label="Forward"
                 color={theme.text}
                 iconColor={theme.icon}
-                onPress={() => copyMessage(actionMessage)}
+                onPress={() => {
+                  setForwardOf(actionMessage);
+                  setForwardQuery('');
+                  setActionMessage(null);
+                }}
               />
+              {actionMessage.senderId === 'me' && (actionMessage.kind === 'text' || actionMessage.text) ? (
+                <MenuRow
+                  icon={Pencil}
+                  label="Edit message"
+                  color={theme.text}
+                  iconColor={theme.icon}
+                  onPress={() => startEdit(actionMessage)}
+                />
+              ) : null}
+              {actionMessage.text ? (
+                <MenuRow
+                  icon={Copy}
+                  label="Copy text"
+                  color={theme.text}
+                  iconColor={theme.icon}
+                  onPress={() => copyMessage(actionMessage)}
+                />
+              ) : null}
               <MenuRow
                 icon={Trash2}
                 label="Delete message"
@@ -1323,12 +1634,74 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
         ) : null}
       </Sheet>
 
+      <Sheet
+        visible={!!forwardOf}
+        onClose={() => setForwardOf(null)}
+        title="Forward message"
+        subtitle="Choose a chat to forward to"
+        maxWidth={430}
+      >
+        <View style={[styles.forwardSearch, { backgroundColor: theme.chip }]}>
+          <Search color={theme.textMuted} size={16} />
+          <TextInput
+            value={forwardQuery}
+            onChangeText={setForwardQuery}
+            placeholder="Search chats"
+            placeholderTextColor={theme.textMuted}
+            style={[styles.forwardSearchInput, { color: theme.text }]}
+          />
+        </View>
+        {state.chats
+          .filter((entry) => entry.id !== chat.id)
+          .filter((entry) =>
+            forwardQuery.trim()
+              ? entry.name.toLowerCase().includes(forwardQuery.trim().toLowerCase())
+              : true,
+          )
+          .slice(0, 12)
+          .map((entry) => (
+            <Pressable
+              key={entry.id}
+              onPress={() => {
+                const target = forwardOf;
+                setForwardOf(null);
+                if (target && !target.id.startsWith('pending-')) {
+                  void forwardMessage(target.id, entry.id);
+                }
+              }}
+              style={({ pressed }) => [
+                styles.contactRow,
+                { borderBottomColor: theme.border },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Avatar name={entry.name} uri={entry.avatar} size={38} group={entry.group} />
+              <View style={styles.contactText}>
+                <Text style={[styles.contactName, { color: theme.text }]} numberOfLines={1}>
+                  {entry.name}
+                </Text>
+                <Text style={[styles.contactMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+                  {entry.group ? `${entry.members ?? 0} members` : entry.about || 'Contact'}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+        {state.chats.filter((entry) => entry.id !== chat.id).length === 0 ? (
+          <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20 }}>
+            No other chats yet. Start a conversation first.
+          </Text>
+        ) : null}
+      </Sheet>
+
       <Sheet visible={infoOpen} onClose={() => setInfoOpen(false)} title="Chat info" maxWidth={480}>
         <View style={styles.infoHero}>
           <Avatar name={chat.name} uri={chat.avatar} size={92} group={chat.group} online={chat.online} showOnline />
           <Text style={[styles.infoName, { color: theme.text }]}>{chat.name}</Text>
           <Text style={[styles.infoSub, { color: theme.textSecondary }]}>
-            {chat.group ? `Group · ${chat.members ?? 0} members` : chat.phone ?? 'WhatsApp contact'}
+            {chat.group
+              ? `Group · ${chat.members ?? 0} members`
+              : [chat.phone, chat.username ? `@${chat.username}` : null].filter(Boolean).join(' · ') ||
+                'WhatsApp contact'}
           </Text>
           {!chat.group && chat.about ? (
             <Text style={[styles.infoAbout, { color: theme.textSecondary }]}>{chat.about}</Text>
@@ -1411,6 +1784,45 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
             </View>
           </View>
         ) : null}
+        {!chat.group && chat.peerId ? (
+          <View style={[styles.infoRow, { borderTopColor: theme.border }]}>
+            {blockedByMe ? <ShieldCheck color={theme.accentDark} size={18} /> : <Ban color={theme.danger} size={18} />}
+            <View style={styles.infoRowText}>
+              <Text style={[styles.infoRowTitle, { color: theme.text }]}>
+                {blockedByMe ? 'Blocked contact' : 'Block this contact'}
+              </Text>
+              <Text style={[styles.infoRowSub, { color: theme.textSecondary }]}>
+                {blockedByMe
+                  ? 'They cannot message or call you until you unblock them.'
+                  : 'Blocked contacts can no longer message you or call you in this app.'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={blockedByMe ? 'Unblock contact' : 'Block contact'}
+                onPress={() => {
+                  void blockUser(chat.peerId ?? '', blockedByMe ? 'unblock' : 'block');
+                }}
+                style={({ pressed }) => [
+                  styles.infoBlockButton,
+                  {
+                    backgroundColor: blockedByMe ? theme.chip : 'rgba(234,67,53,0.12)',
+                    borderColor: blockedByMe ? theme.border : theme.danger,
+                  },
+                  pressed && { opacity: 0.75 },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.infoBlockText,
+                    { color: blockedByMe ? theme.text : theme.danger },
+                  ]}
+                >
+                  {blockedByMe ? 'Unblock contact' : 'Block contact'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </Sheet>
 
     </View>
@@ -1464,6 +1876,30 @@ function ChatImageInner({
       resizeMode="cover"
       onError={onFail}
     />
+  );
+}
+
+function ChatVideo({ uri, width, height }: { uri: string; width: number; height: number }) {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.loop = false;
+  });
+  return (
+    <View
+      style={{
+        width,
+        height,
+        borderRadius: 9,
+        overflow: 'hidden',
+        backgroundColor: '#0b141a',
+      }}
+    >
+      <VideoView
+        player={player}
+        style={{ width, height }}
+        contentFit="contain"
+        allowsFullscreen
+      />
+    </View>
   );
 }
 
@@ -1947,6 +2383,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     minHeight: 42,
     justifyContent: 'center',
+    borderWidth: 1.5,
   },
   input: {
     fontSize: 14.3,
@@ -1962,6 +2399,91 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sendButtonWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+  },
+  forwardedLabel: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    fontStyle: 'italic',
+    paddingHorizontal: 2,
+    marginBottom: 2,
+  },
+  editedLabel: {
+    fontSize: 9.5,
+    fontStyle: 'italic',
+  },
+  documentDownload: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+  },
+  blockedText: {
+    flex: 1,
+    fontSize: 12.5,
+    lineHeight: 17,
+  },
+  unblockButton: {
+    borderRadius: 16,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+  },
+  unblockText: {
+    color: '#ffffff',
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  moreEmojiWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 2,
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginBottom: 14,
+  },
+  reactionEmojiSmall: {
+    fontSize: 20,
+  },
+  forwardSearch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
+    marginBottom: 10,
+  },
+  forwardSearchInput: {
+    flex: 1,
+    fontSize: 13.5,
+  },
+  infoBlockButton: {
+    alignSelf: 'flex-start',
+    borderRadius: 18,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    marginTop: 9,
+  },
+  infoBlockText: {
+    fontSize: 12.5,
+    fontWeight: '700',
   },
   composerReply: {
     flexDirection: 'row',

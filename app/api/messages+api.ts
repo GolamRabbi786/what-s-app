@@ -1,6 +1,7 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../../lib/db';
 import {
+  blocks,
   chatMembers,
   chats,
   messageReactions,
@@ -17,7 +18,7 @@ import {
 import { sendPush } from '../../lib/push';
 import {
   messageDeleteSchema,
-  reactionSchema,
+  messageUpdateSchema,
   sendMessageSchema,
 } from '../../lib/validation';
 
@@ -58,6 +59,42 @@ export async function POST(request: Request) {
     const membership = await getMembership(userId, data.chatId);
     if (!membership) return forbidden('You are not part of this conversation.');
 
+    const memberRows = await memberIdsFor(data.chatId);
+    const others = memberRows.filter((id) => id !== userId);
+    if (others.length === 1) {
+      const blockRows = await db
+        .select({ blockerId: blocks.blockerId })
+        .from(blocks)
+        .where(
+          or(
+            and(eq(blocks.blockerId, userId), eq(blocks.blockedId, others[0])),
+            and(eq(blocks.blockerId, others[0]), eq(blocks.blockedId, userId)),
+          ),
+        )
+        .limit(1);
+      if (blockRows[0]) {
+        return forbidden(
+          blockRows[0].blockerId === userId
+            ? 'You blocked this contact. Unblock them to send messages.'
+            : 'You can no longer send messages to this contact.',
+        );
+      }
+    }
+
+    let source: typeof messages.$inferSelect | undefined;
+    if (data.forwardOf) {
+      const sourceRows = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.id, data.forwardOf))
+        .limit(1);
+      source = sourceRows[0];
+      if (!source) return badRequest('The message you forwarded no longer exists.');
+      if (source.kind === 'call') return badRequest('Call records cannot be forwarded.');
+      const sourceMembership = await getMembership(userId, source.chatId);
+      if (!sourceMembership) return forbidden('You can only forward messages you can see.');
+    }
+
     if (data.replyToId) {
       const replyRows = await db
         .select({ id: messages.id })
@@ -68,17 +105,19 @@ export async function POST(request: Request) {
     }
 
     const now = new Date();
+    const media = data.image ?? data.video ?? source?.image ?? undefined;
     const message = {
       id: newId('msg'),
       chatId: data.chatId,
       senderId: userId,
-      text: data.text.trim(),
-      kind: data.kind,
-      image: data.image,
-      duration: data.duration,
-      fileName: data.fileName,
-      fileSize: data.fileSize,
+      text: source ? data.text.trim() || source.text : data.text.trim(),
+      kind: source ? source.kind : data.kind,
+      image: media,
+      duration: data.duration ?? source?.duration ?? undefined,
+      fileName: data.fileName ?? source?.fileName ?? undefined,
+      fileSize: data.fileSize ?? source?.fileSize ?? undefined,
       replyToId: data.replyToId,
+      forwarded: Boolean(data.forwardOf),
       createdAt: now,
     };
 
@@ -94,14 +133,16 @@ export async function POST(request: Request) {
         and(eq(chatMembers.chatId, data.chatId), eq(chatMembers.userId, userId)),
       );
 
-    const recipients = (await memberIdsFor(data.chatId)).filter((id) => id !== userId);
+    const recipients = memberRows.filter((id) => id !== userId);
     const preview =
       data.text.trim() ||
       (data.kind === 'image'
         ? '📷 Photo'
-        : data.kind === 'voice'
-          ? '🎤 Voice message'
-          : '📎 Attachment');
+        : data.kind === 'video'
+          ? '🎬 Video'
+          : data.kind === 'voice'
+            ? '🎤 Voice message'
+            : '📎 Attachment');
 
     void sendPush(recipients, context.profile.name, preview, {
       chatId: data.chatId,
@@ -129,12 +170,12 @@ export async function PATCH(request: Request) {
     if (!context) return unauthorized();
     if (context.profile.status === 'suspended') return forbidden('This account is suspended.');
 
-    const parsed = reactionSchema.safeParse(await request.json());
-    if (!parsed.success) return badRequest('Invalid reaction.');
+    const parsed = messageUpdateSchema.safeParse(await request.json());
+    if (!parsed.success) return badRequest('Invalid message update.');
 
     const userId = context.profile.id;
     const rows = await db
-      .select({ chatId: messages.chatId })
+      .select()
       .from(messages)
       .where(eq(messages.id, parsed.data.id))
       .limit(1);
@@ -144,6 +185,27 @@ export async function PATCH(request: Request) {
     const membership = await getMembership(userId, message.chatId);
     if (!membership) return forbidden('You are not part of this conversation.');
 
+    if (parsed.data.action === 'edit') {
+      if (message.senderId !== userId) {
+        return forbidden('You can only edit your own messages.');
+      }
+      if (message.kind !== 'text' && !message.text) {
+        return badRequest('Only text messages can be edited.');
+      }
+
+      const editedAt = new Date();
+      await db
+        .update(messages)
+        .set({ text: parsed.data.text, editedAt })
+        .where(eq(messages.id, message.id));
+      await db
+        .update(chats)
+        .set({ updatedAt: editedAt })
+        .where(eq(chats.id, message.chatId));
+      return json({ ok: true, editedAt: editedAt.toISOString() });
+    }
+
+    const emoji = parsed.data.emoji;
     const existing = await db
       .select()
       .from(messageReactions)
@@ -151,7 +213,7 @@ export async function PATCH(request: Request) {
         and(
           eq(messageReactions.messageId, parsed.data.id),
           eq(messageReactions.userId, userId),
-          eq(messageReactions.emoji, parsed.data.emoji),
+          eq(messageReactions.emoji, emoji),
         ),
       )
       .limit(1);
@@ -163,7 +225,7 @@ export async function PATCH(request: Request) {
           and(
             eq(messageReactions.messageId, parsed.data.id),
             eq(messageReactions.userId, userId),
-            eq(messageReactions.emoji, parsed.data.emoji),
+            eq(messageReactions.emoji, emoji),
           ),
         );
       return json({ ok: true, active: false });
@@ -172,12 +234,12 @@ export async function PATCH(request: Request) {
     await db.insert(messageReactions).values({
       messageId: parsed.data.id,
       userId,
-      emoji: parsed.data.emoji,
+      emoji,
     });
 
     return json({ ok: true, active: true });
   } catch (error) {
-    return json({ error: errorMessage(error, 'Unable to react to the message.') }, 500);
+    return json({ error: errorMessage(error, 'Unable to update the message.') }, 500);
   }
 }
 

@@ -38,10 +38,12 @@ type ChatFlag = 'pinned' | 'muted' | 'archived' | 'favorite';
 interface SendOptions {
   kind?: MessageKind;
   image?: string;
+  video?: string;
   duration?: string;
   fileName?: string;
   fileSize?: string;
   replyTo?: ReplyTo;
+  forwardOf?: string;
 }
 
 interface TypingState {
@@ -67,12 +69,21 @@ interface AppContextValue {
   sendMessage: (chatId: string, text: string, options?: SendOptions) => void;
   deleteMessage: (chatId: string, messageId: string) => void;
   toggleReaction: (chatId: string, messageId: string, emoji: string) => void;
+  editMessage: (chatId: string, messageId: string, text: string) => Promise<boolean>;
+  forwardMessage: (messageId: string, toChatId: string) => Promise<boolean>;
+  blockUser: (userId: string, action: 'block' | 'unblock') => Promise<boolean>;
   clearChatMessages: (chatId: string) => void;
   toggleChatFlag: (chatId: string, flag: ChatFlag) => void;
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
   refresh: () => void;
-  addStatus: (input: { caption: string; background: string; image?: string }) => void;
+  addStatus: (input: {
+    caption: string;
+    background: string;
+    image?: string;
+    video?: string;
+    duration?: number;
+  }) => void;
   markStatusViewed: (groupdId: string) => void;
   updateUser: (updates: Partial<AppUser>) => void;
   addCall: (call: CallLog) => void;
@@ -118,6 +129,7 @@ const EMPTY_STATE: AppState = {
   communities: [],
   contacts: [],
   typing: [],
+  blocked: [],
   user: {
     name: '',
     about: 'Hey there! I am using WhatsApp.',
@@ -435,7 +447,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const sendMessage = useCallback(
     (chatId: string, text: string, options: SendOptions = {}) => {
       const trimmed = text.trim();
-      if (!trimmed && !options.image && !options.fileName && !options.duration) return;
+      if (
+        !trimmed &&
+        !options.image &&
+        !options.video &&
+        !options.fileName &&
+        !options.duration
+      ) {
+        return;
+      }
 
       const now = new Date().toISOString();
       const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -449,11 +469,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         createdAt: now,
         status: 'sent',
         kind: options.kind ?? 'text',
-        image: options.image,
+        image: options.image ?? options.video,
         duration: options.duration,
         fileName: options.fileName,
         fileSize: options.fileSize,
         replyTo: options.replyTo,
+        forwarded: options.forwardOf ? true : undefined,
       };
 
       setState((prev) => ({
@@ -474,10 +495,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           text: trimmed,
           kind: options.kind,
           image: options.image,
+          video: options.video,
           duration: options.duration,
           fileName: options.fileName,
           fileSize: options.fileSize,
           replyToId: options.replyTo?.id,
+          forwardOf: options.forwardOf,
         }),
       })
         .then(() => fetchState(true))
@@ -493,6 +516,98 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }));
           handleError(error, 'Your message could not be sent.');
         });
+    },
+    [fetchState, handleError],
+  );
+
+  const editMessage = useCallback(
+    async (chatId: string, messageId: string, text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return false;
+      const previous = (stateRef.current.messages[chatId] ?? []).find(
+        (message) => message.id === messageId,
+      );
+      if (!previous) return false;
+
+      setState((prev) => ({
+        ...prev,
+        messages: {
+          ...prev.messages,
+          [chatId]: (prev.messages[chatId] ?? []).map((message) =>
+            message.id === messageId
+              ? { ...message, text: trimmed, editedAt: new Date().toISOString() }
+              : message,
+          ),
+        },
+      }));
+
+      try {
+        await apiRequest('/api/messages', {
+          method: 'PATCH',
+          body: JSON.stringify({ action: 'edit', id: messageId, text: trimmed }),
+        });
+        void fetchState(true);
+        return true;
+      } catch (error) {
+        setState((prev) => ({
+          ...prev,
+          messages: {
+            ...prev.messages,
+            [chatId]: (prev.messages[chatId] ?? []).map((message) =>
+              message.id === messageId
+                ? { ...message, text: previous.text, editedAt: previous.editedAt }
+                : message,
+            ),
+          },
+        }));
+        handleError(error, 'Unable to edit the message.');
+        return false;
+      }
+    },
+    [fetchState, handleError],
+  );
+
+  const forwardMessage = useCallback(
+    async (messageId: string, toChatId: string) => {
+      try {
+        await apiRequest('/api/messages', {
+          method: 'POST',
+          body: JSON.stringify({ chatId: toChatId, forwardOf: messageId }),
+        });
+        await fetchState(true);
+        return true;
+      } catch (error) {
+        handleError(error, 'Unable to forward the message.');
+        return false;
+      }
+    },
+    [fetchState, handleError],
+  );
+
+  const blockUser = useCallback(
+    async (userId: string, action: 'block' | 'unblock') => {
+      const previous = stateRef.current.blocked;
+      setState((prev) => ({
+        ...prev,
+        blocked:
+          action === 'block'
+            ? previous.includes(userId)
+              ? previous
+              : [...previous, userId]
+            : previous.filter((id) => id !== userId),
+      }));
+      try {
+        await apiRequest('/api/blocks', {
+          method: 'POST',
+          body: JSON.stringify({ userId, action }),
+        });
+        void fetchState(true);
+        return true;
+      } catch (error) {
+        setState((prev) => ({ ...prev, blocked: previous }));
+        handleError(error, 'Unable to update blocked contacts.');
+        return false;
+      }
     },
     [fetchState, handleError],
   );
@@ -592,13 +707,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [setTheme]);
 
   const addStatus = useCallback(
-    (input: { caption: string; background: string; image?: string }) => {
+    (input: {
+      caption: string;
+      background: string;
+      image?: string;
+      video?: string;
+      duration?: number;
+    }) => {
       void apiRequest('/api/statuses', {
         method: 'POST',
         body: JSON.stringify({
           caption: input.caption,
           background: input.background,
           image: input.image,
+          video: input.video,
+          duration: input.duration,
         }),
       })
         .then(() => fetchState(true))
@@ -972,6 +1095,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       sendMessage,
       deleteMessage,
       toggleReaction,
+      editMessage,
+      forwardMessage,
+      blockUser,
       clearChatMessages,
       toggleChatFlag,
       setTheme,
@@ -1017,6 +1143,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       sendMessage,
       deleteMessage,
       toggleReaction,
+      editMessage,
+      forwardMessage,
+      blockUser,
       clearChatMessages,
       toggleChatFlag,
       setTheme,

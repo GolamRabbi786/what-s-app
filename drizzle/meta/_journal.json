@@ -29,6 +29,13 @@
       "when": 1794592486170,
       "tag": "0003_fat_otto_octavius",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794720884053,
+      "tag": "0004_shocking_black_cat",
+      "breakpoints": true
     }
   ]
 }
