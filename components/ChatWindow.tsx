@@ -1604,7 +1604,9 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
                   setActionMessage(null);
                 }}
               />
-              {actionMessage.senderId === 'me' && (actionMessage.kind === 'text' || actionMessage.text) ? (
+              {actionMessage.senderId === 'me' &&
+              !actionMessage.id.startsWith('pending-') &&
+              (actionMessage.kind === 'text' || actionMessage.text) ? (
                 <MenuRow
                   icon={Pencil}
                   label="Edit message"
@@ -1662,6 +1664,8 @@ export function ChatWindow({ chat, onClose }: ChatWindowProps) {
           .map((entry) => (
             <Pressable
               key={entry.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Forward to ${entry.name}`}
               onPress={() => {
                 const target = forwardOf;
                 setForwardOf(null);

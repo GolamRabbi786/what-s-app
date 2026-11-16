@@ -214,6 +214,7 @@ function ChatsHome() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.chipScroller}
           contentContainerStyle={styles.chipRow}
         >
           {filterChips.map((chip) => {
@@ -993,6 +994,11 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 19,
+  },
+  chipScroller: {
+    height: 51,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   emptyListContent: {
     flexGrow: 1,

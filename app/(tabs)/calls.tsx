@@ -209,7 +209,12 @@ function CallsHome() {
             ) : null}
           </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipScroller}
+            contentContainerStyle={styles.chipRow}
+          >
             {chips.map((chip) => {
               const active = filter === chip.key;
               return (
@@ -762,6 +767,11 @@ const styles = StyleSheet.create({
   chipRow: {
     paddingVertical: 11,
     gap: 7,
+  },
+  chipScroller: {
+    height: 51,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   chip: {
     flexDirection: 'row',
