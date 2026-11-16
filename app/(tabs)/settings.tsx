@@ -760,6 +760,38 @@ function SettingsHome() {
         </View>
         <Text style={[styles.charCount, { color: theme.textMuted }]}>{editAbout.length}/90</Text>
 
+        <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>QUICK ABOUT</Text>
+        <View style={styles.quickAboutRow}>
+          {['Available', 'At work', 'Sleeping', 'Busy', 'At the gym', 'On a call'].map(
+            (preset, index) => (
+              <FadeSlideIn key={preset} delay={index * 40} offset={6}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Set about to ${preset}`}
+                  onPress={() => setEditAbout(preset)}
+                  style={({ pressed }) => [
+                    styles.quickAboutChip,
+                    {
+                      backgroundColor: editAbout === preset ? theme.accent : theme.chip,
+                      borderColor: editAbout === preset ? theme.accent : 'transparent',
+                    },
+                    pressed && { opacity: 0.72 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.quickAboutText,
+                      { color: editAbout === preset ? '#ffffff' : theme.textSecondary },
+                    ]}
+                  >
+                    {preset}
+                  </Text>
+                </Pressable>
+              </FadeSlideIn>
+            ),
+          )}
+        </View>
+
         <View style={[styles.fieldBox, styles.readonlyField, { backgroundColor: theme.chip }]}>
           <Smartphone color={theme.textMuted} size={17} />
           <Text style={[styles.readonlyText, { color: theme.textSecondary }]}>
@@ -1823,6 +1855,23 @@ const styles = StyleSheet.create({
     fontSize: 9,
     textAlign: 'right',
     marginTop: 3,
+  },
+  quickAboutRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+    marginTop: 2,
+    marginBottom: 14,
+  },
+  quickAboutChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1.5,
+  },
+  quickAboutText: {
+    fontSize: 11.5,
+    fontWeight: '600',
   },
   readonlyField: {
     marginTop: 13,

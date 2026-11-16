@@ -156,7 +156,6 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
       setPhoto(dataUri);
       modePulse.setValue(0);
       setMode('photo');
-      setActiveMode('photo');
       setBusy(false);
     } catch (error) {
       setBusy(false);
@@ -200,7 +199,6 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
       setVideoSeconds(asset.duration ? Math.max(3, Math.min(60, Math.round(asset.duration))) : 10);
       modePulse.setValue(0);
       setMode('video');
-      setActiveMode('video');
       setBusy(false);
     } catch (error) {
       setBusy(false);
@@ -236,7 +234,6 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
     setPhoto(null);
     setVideo(null);
     setMode('text');
-    setActiveMode('text');
     onClose();
   };
 
@@ -321,7 +318,7 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
         style={[
           styles.preview,
           {
-            backgroundColor: activeMode === 'text' ? background : '#0b141a',
+            backgroundColor: mode === 'text' ? background : '#0b141a',
             borderColor: theme.border,
             opacity: modePulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
             transform: [
@@ -332,7 +329,7 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
           },
         ]}
       >
-        {activeMode === 'photo' && photo ? (
+        {mode === 'photo' && photo ? (
           <>
             <Image source={{ uri: photo }} style={StyleSheet.absoluteFill} resizeMode="cover" />
             <View style={styles.photoShade} />
@@ -345,17 +342,17 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
               <X color="#ffffff" size={15} />
             </Pressable>
           </>
-        ) : activeMode === 'video' && video ? (
+        ) : mode === 'video' && video ? (
           <StatusVideoPreview uri={video} onRemove={() => setVideo(null)} />
-        ) : activeMode === 'photo' || activeMode === 'video' ? (
+        ) : mode === 'photo' || mode === 'video' ? (
           <View style={styles.mediaPlaceholder}>
-            {activeMode === 'photo' ? (
+            {mode === 'photo' ? (
               <ImageIcon color="rgba(255,255,255,0.65)" size={34} />
             ) : (
               <VideoIcon color="rgba(255,255,255,0.65)" size={34} />
             )}
             <Text style={styles.mediaPlaceholderText}>
-              {activeMode === 'photo' ? 'Pick a photo below' : 'Pick a video below'}
+              {mode === 'photo' ? 'Pick a photo below' : 'Pick a video below'}
             </Text>
           </View>
         ) : (
@@ -365,7 +362,7 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
           </>
         )}
 
-        {activeMode === 'text' ? (
+        {mode === 'text' ? (
           <>
             <View style={styles.previewTop}>
               <View style={styles.previewBadge}>
@@ -387,7 +384,7 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
         ) : null}
       </Animated.View>
 
-      {activeMode !== 'text' ? (
+      {mode !== 'text' ? (
         <TextInput
           value={caption}
           onChangeText={setCaption}
@@ -399,7 +396,7 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
         />
       ) : null}
 
-      {activeMode === 'text' ? (
+      {mode === 'text' ? (
         <>
           <View style={styles.optionHeader}>
             <Type color={theme.icon} size={16} />
@@ -431,7 +428,7 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
         </>
       ) : null}
 
-      {activeMode === 'photo' ? (
+      {mode === 'photo' ? (
         <>
           <View style={styles.optionHeader}>
             <ImageIcon color={theme.icon} size={16} />
@@ -466,7 +463,7 @@ export function NewStatusModal({ visible, onClose }: NewStatusModalProps) {
         </>
       ) : null}
 
-      {activeMode === 'video' ? (
+      {mode === 'video' ? (
         <>
           <View style={styles.optionHeader}>
             <VideoIcon color={theme.icon} size={16} />

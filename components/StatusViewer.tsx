@@ -1,5 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, ChevronRight, Pause, Play, Send, X } from 'lucide-react-native';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { ChevronLeft, ChevronRight, Pause, Play, Send, Volume2, VolumeX, X } from 'lucide-react-native';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -142,7 +143,9 @@ export function StatusViewer({ visible, statusId, onClose }: StatusViewerProps) 
             },
           ]}
         >
-          {item.type === 'image' && item.image ? (
+          {item.type === 'video' && item.image ? (
+            <StatusVideo uri={item.image} paused={paused} />
+          ) : item.type === 'image' && item.image ? (
             <Image source={{ uri: item.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           ) : (
             <View
@@ -282,6 +285,47 @@ export function StatusViewer({ visible, statusId, onClose }: StatusViewerProps) 
         </View>
       </SafeAreaView>
     </Modal>
+  );
+}
+
+function StatusVideo({ uri, paused }: { uri: string; paused: boolean }) {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.loop = false;
+  });
+  const [muted, setMuted] = useState(true);
+
+  useEffect(() => {
+    try {
+      if (paused) {
+        player.pause();
+      } else {
+        player.play();
+      }
+    } catch {
+      // Player may already be released.
+    }
+  }, [paused, player]);
+
+  useEffect(() => {
+    try {
+      player.muted = muted;
+    } catch {
+      // ignore
+    }
+  }, [muted, player]);
+
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={muted ? 'Unmute status video' : 'Mute status video'}
+        onPress={() => setMuted((value) => !value)}
+        style={styles.videoMuteButton}
+      >
+        {muted ? <VolumeX color="#ffffff" size={15} /> : <Volume2 color="#ffffff" size={15} />}
+      </Pressable>
+    </View>
   );
 }
 
@@ -457,6 +501,17 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoMuteButton: {
+    position: 'absolute',
+    bottom: 14,
+    left: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },

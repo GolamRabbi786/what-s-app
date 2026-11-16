@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  Video as VideoIcon,
   X,
 } from 'lucide-react-native';
 import React, { useMemo, useState } from 'react';
@@ -549,6 +550,10 @@ function StatusRow({
       </View>
       {preview?.type === 'image' && preview.image ? (
         <Image source={{ uri: preview.image }} style={styles.statusThumb} resizeMode="cover" />
+      ) : preview?.type === 'video' ? (
+        <View style={[styles.statusTextPreview, { backgroundColor: '#0b141a' }]}>
+          <VideoIcon color="#ffffff" size={13} />
+        </View>
       ) : (
         <View style={[styles.statusTextPreview, { backgroundColor: preview?.background ?? theme.chip }]}>
           <MessageCircle color="#ffffff" size={13} />
